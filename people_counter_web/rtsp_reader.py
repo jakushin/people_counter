@@ -21,9 +21,11 @@ class RTSPReader:
 
         self.frame = None
         self.fps = 0.0
-        self.bitrate = 0.0   # в kbps
+        self.bitrate = 0.0   # kbps
         self.frame_width = target_width
         self.frame_height = 0
+        self.src_width = 0   # исходное разрешение потока
+        self.src_height = 0
         self.running = False
 
     def start(self) -> None:
@@ -43,6 +45,10 @@ class RTSPReader:
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open RTSP stream: {self.url}")
 
+        # читаем исходное разрешение потока
+        self.src_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
         prev_time = time.time()
         frame_count = 0
 
@@ -60,7 +66,7 @@ class RTSPReader:
                 frame_count = 0
                 prev_time = now
 
-            # Resize
+            # Resize for display
             h, w = frame.shape[:2]
             scale = self.target_width / w
             new_h = int(h * scale)
@@ -72,18 +78,17 @@ class RTSPReader:
         cap.release()
 
     def frame_generator(self):
-        """Генератор JPEG-кадров для StreamingResponse."""
+        """JPEG-генератор для StreamingResponse."""
         while True:
             if self.frame is None:
                 time.sleep(0.05)
                 continue
-
             ret, jpeg = cv2.imencode('.jpg', self.frame)
             if not ret:
                 continue
 
             data = jpeg.tobytes()
-            # приблизительный bitrate = средний размер кадра * fps * 8 / 1000 (в kbps)
+            # приблизительный bitrate в kbps
             self.bitrate = len(data) * self.fps * 8 / 1000
             yield (
                 b'--frame\r\n'

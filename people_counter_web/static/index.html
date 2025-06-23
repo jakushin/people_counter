@@ -13,8 +13,9 @@
 
     <div class="diag" id="diag">
         <div>FPS: <span id="fps">0</span></div>
-        <div>RES: <span id="res">0×0</span></div>
-        <div>BR:  <span id="br">0</span> kbps</div>
+        <div>DISP: <span id="res_disp">0×0</span></div>
+        <div>SR:   <span id="res_stream">0×0</span></div>
+        <div>BR:   <span id="br">0</span> kbps</div>
         <div>COORD: <span id="coords">—</span></div>
     </div>
 
@@ -32,10 +33,11 @@
 
     const pt1 = document.getElementById("point1");
     const pt2 = document.getElementById("point2");
-    const elFps  = document.getElementById("fps");
-    const elRes  = document.getElementById("res");
-    const elBr   = document.getElementById("br");
-    const elCoord= document.getElementById("coords");
+    const elFps       = document.getElementById("fps");
+    const elResDisp   = document.getElementById("res_disp");
+    const elResStream = document.getElementById("res_stream");
+    const elBr        = document.getElementById("br");
+    const elCoord     = document.getElementById("coords");
 
     function resizeOverlay() {
         const crect = container.getBoundingClientRect();
@@ -69,10 +71,11 @@
 
     async function updateDiagnostics() {
         const data = await (await fetch("/get_status")).json();
-        elFps.innerText   = data.fps;
-        elRes.innerText   = data.resolution;
-        elBr.innerText    = data.bitrate;
-        elCoord.innerText = data.coords;
+        elFps.innerText       = data.fps;
+        elResDisp.innerText   = data.resolution_disp;
+        elResStream.innerText = data.resolution_stream;
+        elBr.innerText        = data.bitrate;
+        elCoord.innerText     = data.coords;
         drawLine();
         positionPoints();
     }

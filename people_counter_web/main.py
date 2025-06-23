@@ -41,6 +41,7 @@ def video_feed():
 
 @app.get("/get_line")
 async def get_line():
+    # всегда отдаем либо сохранённые, либо дефолт из файла
     return JSONResponse({
         "line_start": reader.line_start,
         "line_end":   reader.line_end
@@ -59,10 +60,11 @@ async def set_line(
 @app.get("/get_status")
 async def get_status():
     return JSONResponse({
-        "fps":       round(reader.fps,  2),
-        "resolution": f"{reader.frame_width}×{reader.frame_height}",
-        "bitrate":   round(reader.bitrate,  1),  # в kbps
-        "coords":    f"{reader.line_start} → {reader.line_end}"
+        "fps":               round(reader.fps, 2),
+        "resolution_disp":   f"{reader.frame_width}×{reader.frame_height}",
+        "resolution_stream": f"{reader.src_width}×{reader.src_height}",
+        "bitrate":           round(reader.bitrate, 1),
+        "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
 if __name__ == "__main__":
