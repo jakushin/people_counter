@@ -15,7 +15,7 @@ from rtsp_reader import RTSPReader
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# RTSP URL из окружения
+# Получаем RTSP_URL из окружения (формируется в start.sh)
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
@@ -23,17 +23,19 @@ if not RTSP_URL:
 
 TARGET_WIDTH = 960
 
-# FastAPI
+# Создаём FastAPI-приложение
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Модель + линия
+# Загружаем модель и стартовые координаты линии
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
 
-# RTSP-поток
+# Инициализируем и запускаем RTSPReader
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
+
+# --- Роуты API ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -73,18 +75,20 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
+# При штатном завершении FastAPI останавливаем RTSPReader
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down RTSP reader...")
     reader.stop()
 
+# --- Точка входа при запуске через python3 main.py ---
+
 if __name__ == "__main__":
     import uvicorn
 
-    # Перехват Ctrl+C
+    # Перехват SIGINT/SIGTERM для генерации KeyboardInterrupt
     def _signal_handler(sig, frame):
         raise KeyboardInterrupt()
-
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
@@ -93,8 +97,8 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=8000,
         log_level="info",
-        timeout_keep_alive=1,
-        force_exit=True,
+        timeout_keep_alive=1,  # уменьшаем ожидание keep-alive
+        force_exit=True,       # принудительный выход без ожидания соединений
     )
     server = uvicorn.Server(config)
 
