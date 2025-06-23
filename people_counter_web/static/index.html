@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>People Counter</title>
+    <style>
+        body { background-color: #000; color: #fff; font-family: sans-serif; }
+        .video-container { position: relative; display: inline-block; }
+        .diag { position: absolute; top: 10px; right: 10px; text-align: right; background: rgba(0,0,0,0.5); padding: 10px; }
+        .point { position: absolute; width: 16px; height: 16px; background: #f00; border-radius: 50%; cursor: move; }
+    </style>
+</head>
+<body>
+    <div class="video-container">
+        <img id="video" src="/video" style="max-width: 100%;" />
+        <div class="diag" id="diag">
+            FPS: <span id="fps">0</span><br />
+            RES: <span id="res">0x0</span><br />
+            Line: <span id="line">-</span>
+        </div>
+        <div id="point1" class="point"></div>
+        <div id="point2" class="point"></div>
+    </div>
+
+    <script>
+        async function updateLine() {
+            const resp = await fetch('/get_line');
+            const data = await resp.json();
+
+            const img = document.getElementById('video');
+            const scale = img.clientWidth / 960;
+
+            point1.style.left = (data.line_start[0] * scale - 8) + 'px';
+            point1.style.top  = (data.line_start[1] * scale - 8) + 'px';
+            point2.style.left = (data.line_end[0] * scale - 8) + 'px';
+            point2.style.top  = (data.line_end[1] * scale - 8) + 'px';
+
+            document.getElementById('line').innerText = `${data.line_start} - ${data.line_end}`;
+        }
+
+        async function updateDiag() {
+            const resp = await fetch('/get_status');
+            const data = await resp.json();
+            document.getElementById('fps').innerText = data.fps;
+            document.getElementById('res').innerText = data.frame_size;
+        }
+
+        function makeDraggable(el, pointName) {
+            el.onmousedown = function(event) {
+                event.preventDefault();
+                document.onmousemove = function(e) {
+                    const img = document.getElementById('video');
+                    const scale = img.clientWidth / 960;
+
+                    let x = (e.pageX - img.offsetLeft) / scale;
+                    let y = (e.pageY - img.offsetTop) / scale;
+                    x = Math.max(0, Math.min(960, x));
+                    y = Math.max(0, y);
+
+                    if (pointName === 'start') {
+                        postLine(Math.round(x), Math.round(y), rtLine[1][0], rtLine[1][1]);
+                    } else {
+                        postLine(rtLine[0][0], rtLine[0][1], Math.round(x), Math.round(y));
+                    }
+                };
+                document.onmouseup = function() {
+                    document.onmousemove = null;
+                    document.onmouseup = null;
+                };
+            };
+        }
+
+        async function postLine(x1, y1, x2, y2) {
+            rtLine = [[x1, y1], [x2, y2]];
+            const form = new FormData();
+            form.append('x1', x1);
+            form.append('y1', y1);
+            form.append('x2', x2);
+            form.append('y2', y2);
+            await fetch('/set_line', { method: 'POST', body: form });
+            updateLine();
+        }
+
+        let rtLine = [[0,0],[0,0]];
+        const point1 = document.getElementById('point1');
+        const point2 = document.getElementById('point2');
+
+        makeDraggable(point1, 'start');
+        makeDraggable(point2, 'end');
+
+        setInterval(updateLine, 1000);
+        setInterval(updateDiag, 1000);
+    </script>
+</body>
+</html>
