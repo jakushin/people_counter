@@ -1,4 +1,3 @@
-<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -70,12 +69,21 @@
     }
 
     async function updateDiagnostics() {
-        const data = await (await fetch("/get_status")).json();
+        // 1) Сначала подтягиваем координаты линии
+        const lineRes = await fetch("/get_line");
+        const { line_start, line_end } = await lineRes.json();
+        currentLine = [line_start, line_end];
+        elCoord.innerText = `${line_start} → ${line_end}`;
+
+        // 2) Затем — все остальное
+        const statRes = await fetch("/get_status");
+        const data = await statRes.json();
         elFps.innerText       = data.fps;
         elResDisp.innerText   = data.resolution_disp;
         elResStream.innerText = data.resolution_stream;
         elBr.innerText        = data.bitrate;
-        elCoord.innerText     = data.coords;
+
+        // 3) И в конце — рисуем линию и точки
         drawLine();
         positionPoints();
     }
@@ -105,6 +113,7 @@
             if (dragging) {
                 dragging = false;
                 document.body.style.cursor = "";
+                // сохраняем сразу после отпускания
                 const form = new FormData();
                 form.append("x1", currentLine[0][0]);
                 form.append("y1", currentLine[0][1]);
