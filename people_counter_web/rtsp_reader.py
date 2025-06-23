@@ -1,16 +1,16 @@
-# rtsp_reader.py
 import cv2
 import threading
 import time
 from ultralytics import YOLO
 
 class RTSPReader:
-    def __init__(self, url, line_start, line_end, target_width, model):
+    def __init__(self, url, line_start, line_end, target_width, model, region=None):
         self.url = url
         self.line_start = line_start
         self.line_end = line_end
         self.target_width = target_width
         self.model = model
+        self.region = region  # (x1,y1,x2,y2) or None
 
         self.frame = None
         self.fps = 0.0
@@ -40,8 +40,7 @@ class RTSPReader:
         self.src_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        prev = time.time()
-        cnt = 0
+        prev = time.time(); cnt = 0
         while self.running:
             ret, frame = cap.read()
             if not ret:
@@ -56,14 +55,19 @@ class RTSPReader:
                 cnt = 0
                 prev = now
 
-            # Resize for display
+            # Применяем ROI, если задана
+            if self.region:
+                x1, y1, x2, y2 = self.region
+                frame = frame[y1:y2, x1:x2]
+
+            # Resize для отображения
             h, w = frame.shape[:2]
             scale = self.target_width / w
             nh = int(h * scale)
             disp = cv2.resize(frame, (self.target_width, nh))
             self.frame_width, self.frame_height = self.target_width, nh
 
-            # **Больше не рисуем линию здесь** — всё в браузере
+            # **Линию не рисуем здесь**, всё в браузере
             self.frame = disp
 
         cap.release()
@@ -77,6 +81,7 @@ class RTSPReader:
             if not ret:
                 continue
             data = jpeg.tobytes()
+            # bitrate в kbps
             self.bitrate = len(data) * self.fps * 8 / 1000
             yield (
                 b'--frame\r\n'

@@ -1,4 +1,3 @@
-# main.py
 import logging, os, sys, signal
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -6,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
 
 from line_config import load_line_config, save_line_config
+from region_config import load_region_config, save_region_config
 from rtsp_reader import RTSPReader
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -20,9 +20,12 @@ TARGET_WIDTH = 960
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Загружаем старые значения
 start, end = load_line_config()
+region     = load_region_config()
+
 model = YOLO("yolov8n.pt")
-reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
+reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model, region)
 reader.start()
 
 @app.get("/", response_class=HTMLResponse)
@@ -46,6 +49,19 @@ async def set_line(x1: int = Form(...), y1: int = Form(...),
     save_line_config(reader.line_start, reader.line_end)
     return {"status": "ok"}
 
+@app.get("/get_region")
+async def get_region():
+    # вернёт [x1,y1,x2,y2] или null
+    return JSONResponse({"region": reader.region})
+
+@app.post("/set_region")
+async def set_region(x1: int = Form(...), y1: int = Form(...),
+                     x2: int = Form(...), y2: int = Form(...)):
+    reg = (x1, y1, x2, y2)
+    reader.region = reg
+    save_region_config(reg)
+    return {"status": "ok"}
+
 @app.get("/get_status")
 async def get_status():
     return JSONResponse({
@@ -53,7 +69,8 @@ async def get_status():
         "resolution_disp":   f"{reader.frame_width}×{reader.frame_height}",
         "resolution_stream": f"{reader.src_width}×{reader.src_height}",
         "bitrate":           round(reader.bitrate, 1),
-        "coords":            f"{reader.line_start} → {reader.line_end}"
+        "coords":            f"{reader.line_start} → {reader.line_end}",
+        "region":            reader.region
     })
 
 @app.on_event("shutdown")
@@ -62,10 +79,9 @@ def on_shutdown():
 
 if __name__ == "__main__":
     import uvicorn
-    def _sig(sig,frame): raise KeyboardInterrupt()
+    def _sig(sig, frame): raise KeyboardInterrupt()
     signal.signal(signal.SIGINT, _sig)
     signal.signal(signal.SIGTERM, _sig)
-
     uvicorn.run("main:app",
                 host="0.0.0.0", port=8000,
                 log_level="warning", access_log=False, timeout_keep_alive=1)
