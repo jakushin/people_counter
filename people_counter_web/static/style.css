@@ -1,15 +1,13 @@
 /* static/style.css */
 body, html {
-    margin: 0;
-    padding: 0;
-    height: 100%;
+    margin: 0; padding: 0; height: 100%;
 }
 
 .video-container {
     position: relative;
     width: 100%;
     max-width: 960px;
-    margin: 0 auto;
+    margin: auto;
 }
 
 .video-container img {
@@ -20,25 +18,36 @@ body, html {
 
 .diag {
     position: absolute;
-    top: 8px;
-    left: 8px;
+    top: 8px; left: 8px;
     background: rgba(0,0,0,0.6);
     color: #fff;
     padding: 6px 10px;
-    font-family: sans-serif;
-    font-size: 14px;
+    font: 14px sans-serif;
     border-radius: 4px;
-    z-index: 10;
+    z-index: 20;
 }
 
 .point {
     position: absolute;
-    width: 16px;
-    height: 16px;
+    width: 16px; height: 16px;
     background: rgba(255,0,0,0.8);
     border: 2px solid #fff;
     border-radius: 50%;
     cursor: grab;
-    z-index: 20;
+    z-index: 30;
     user-select: none;
+}
+
+svg#overlay {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 25;
+}
+
+svg#overlay line {
+    stroke: lime;
+    stroke-width: 2;
 }

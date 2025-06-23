@@ -7,8 +7,9 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div class="video-container">
+<div class="video-container" id="container">
     <img id="video" src="/video" alt="Video stream" />
+    <svg id="overlay"></svg>
 
     <div class="diag" id="diag">
         FPS: <span id="fps">0</span><br>
@@ -16,7 +17,6 @@
         Line: <span id="line">—</span>
     </div>
 
-    <!-- Только ДВЕ точки -->
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
 </div>
@@ -24,26 +24,50 @@
 <script>
     let currentLine = [[0,0],[0,0]];
     const img = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const lineEl = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    overlay.appendChild(lineEl);
     const pt1 = document.getElementById("point1");
     const pt2 = document.getElementById("point2");
 
-    async function updateLine() {
-        const { line_start, line_end } = await (await fetch("/get_line")).json();
-        currentLine = [line_start, line_end];
+    function resizeOverlay() {
+        const rect = img.getBoundingClientRect();
+        overlay.setAttribute("width", rect.width);
+        overlay.setAttribute("height", rect.height);
+        overlay.style.width = rect.width + "px";
+        overlay.style.height = rect.height + "px";
+        overlay.style.top = rect.top + "px";
+        overlay.style.left = rect.left + "px";
+        drawLine();
         positionPoints();
-        document.getElementById("line").innerText = `${line_start} → ${line_end}`;
+    }
+
+    function drawLine() {
+        const rect = img.getBoundingClientRect();
+        const scale = rect.width / 960;
+        const [p1, p2] = currentLine;
+        lineEl.setAttribute("x1", p1[0] * scale);
+        lineEl.setAttribute("y1", p1[1] * scale);
+        lineEl.setAttribute("x2", p2[0] * scale);
+        lineEl.setAttribute("y2", p2[1] * scale);
     }
 
     function positionPoints() {
         const rect = img.getBoundingClientRect();
         const scale = rect.width / 960;
         const [p1, p2] = currentLine;
+        pt1.style.left = rect.left + p1[0]*scale - pt1.offsetWidth/2 + "px";
+        pt1.style.top  = rect.top  + p1[1]*scale - pt1.offsetHeight/2 + "px";
+        pt2.style.left = rect.left + p2[0]*scale - pt2.offsetWidth/2 + "px";
+        pt2.style.top  = rect.top  + p2[1]*scale - pt2.offsetHeight/2 + "px";
+    }
 
-        pt1.style.left = `${rect.left + p1[0]*scale - pt1.offsetWidth/2}px`;
-        pt1.style.top  = `${rect.top  + p1[1]*scale - pt1.offsetHeight/2}px`;
-
-        pt2.style.left = `${rect.left + p2[0]*scale - pt2.offsetWidth/2}px`;
-        pt2.style.top  = `${rect.top  + p2[1]*scale - pt2.offsetHeight/2}px`;
+    async function updateLine() {
+        const { line_start, line_end } = await (await fetch("/get_line")).json();
+        currentLine = [line_start, line_end];
+        document.getElementById("line").innerText = `${line_start} → ${line_end}`;
+        drawLine();
+        positionPoints();
     }
 
     async function updateStatus() {
@@ -54,7 +78,6 @@
 
     function makeDraggable(el, idx) {
         let dragging = false;
-
         el.addEventListener("mousedown", e => {
             e.preventDefault();
             dragging = true;
@@ -70,35 +93,37 @@
             x = Math.max(0, Math.min(960, x));
             y = Math.max(0, y);
             currentLine[idx] = [Math.round(x), Math.round(y)];
-            postLine();
+            drawLine();
+            positionPoints();
         });
 
-        window.addEventListener("mouseup", () => {
+        window.addEventListener("mouseup", async () => {
             if (dragging) {
                 dragging = false;
                 document.body.style.cursor = "";
+                // сохраняем на сервере
+                const form = new FormData();
+                form.append("x1", currentLine[0][0]);
+                form.append("y1", currentLine[0][1]);
+                form.append("x2", currentLine[1][0]);
+                form.append("y2", currentLine[1][1]);
+                await fetch("/set_line", { method: "POST", body: form });
                 updateLine();
             }
         });
     }
 
-    async function postLine() {
-        const form = new FormData();
-        form.append("x1", currentLine[0][0]);
-        form.append("y1", currentLine[0][1]);
-        form.append("x2", currentLine[1][0]);
-        form.append("y2", currentLine[1][1]);
-        await fetch("/set_line", { method: "POST", body: form });
-        positionPoints();
-    }
-
-    // инициализация
+    // Инициализация
     makeDraggable(pt1, 0);
     makeDraggable(pt2, 1);
-    window.addEventListener("resize", positionPoints);
-    img.onload = () => { updateLine(); updateStatus(); };
-    setInterval(updateLine, 1000);
-    setInterval(updateStatus, 1000);
+    window.addEventListener("resize", resizeOverlay);
+    img.onload = () => {
+        resizeOverlay();
+        updateLine();
+        updateStatus();
+        setInterval(updateLine, 1000);
+        setInterval(updateStatus, 1000);
+    };
 </script>
 </body>
 </html>

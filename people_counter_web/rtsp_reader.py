@@ -1,4 +1,4 @@
-# rtsp_reader.py
+# rtsp_reader.py (итоговый)
 import cv2
 import threading
 import time
@@ -66,9 +66,7 @@ class RTSPReader:
             frame = cv2.resize(frame, (self.target_width, new_h))
             self.frame_width, self.frame_height = self.target_width, new_h
 
-            # рисуем только ОДНУ линию между точками
-            cv2.line(frame, self.line_start, self.line_end, (0,255,0), 2)
-
+            # поток без наложения линии (линия в HTML)
             self.frame = frame
 
         cap.release()
