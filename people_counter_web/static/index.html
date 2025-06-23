@@ -9,30 +9,38 @@
 <body>
 <div class="video-container">
     <img id="video" src="/video" alt="Video stream" />
+
     <div class="diag" id="diag">
         FPS: <span id="fps">0</span><br>
         RES: <span id="res">0x0</span><br>
         Line: <span id="line">—</span>
     </div>
+
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
 </div>
 
 <script>
     let currentLine = [[0,0],[0,0]];
+    const img = document.getElementById("video");
     const pt1 = document.getElementById("point1");
     const pt2 = document.getElementById("point2");
 
     async function updateLine() {
         const { line_start, line_end } = await (await fetch("/get_line")).json();
         currentLine = [line_start, line_end];
-        const img = document.getElementById("video");
-        const scale = img.clientWidth / 960;
-        pt1.style.left = (line_start[0]*scale - 8) + "px";
-        pt1.style.top  = (line_start[1]*scale - 8) + "px";
-        pt2.style.left = (line_end[0]*scale - 8) + "px";
-        pt2.style.top  = (line_end[1]*scale - 8) + "px";
+        positionPoints();
         document.getElementById("line").innerText = `${line_start} → ${line_end}`;
+    }
+
+    function positionPoints() {
+        const rect = img.getBoundingClientRect();
+        const scale = rect.width / 960;
+        const [p1, p2] = currentLine;
+        pt1.style.left = `${rect.left + p1[0]*scale - pt1.offsetWidth/2}px`;
+        pt1.style.top  = `${rect.top +  p1[1]*scale - pt1.offsetHeight/2}px`;
+        pt2.style.left = `${rect.left + p2[0]*scale - pt2.offsetWidth/2}px`;
+        pt2.style.top  = `${rect.top +  p2[1]*scale - pt2.offsetHeight/2}px`;
     }
 
     async function updateStatus() {
@@ -42,23 +50,36 @@
     }
 
     function makeDraggable(el, idx) {
-        el.onmousedown = e => {
+        let isDragging = false;
+
+        el.addEventListener("mousedown", e => {
             e.preventDefault();
-            document.onmousemove = ev => {
-                const img = document.getElementById("video");
-                const scale = img.clientWidth / 960;
-                let x = (ev.pageX - img.offsetLeft) / scale;
-                let y = (ev.pageY - img.offsetTop) / scale;
-                x = Math.max(0, Math.min(960, x));
-                y = Math.max(0, y);
-                currentLine[idx] = [Math.round(x), Math.round(y)];
-                postLine();
-            };
-            document.onmouseup = () => {
-                document.onmousemove = null;
-                document.onmouseup = null;
-            };
-        };
+            isDragging = true;
+            document.body.style.cursor = "grabbing";
+        });
+
+        window.addEventListener("mousemove", e => {
+            if (!isDragging) return;
+            const rect = img.getBoundingClientRect();
+            const scale = rect.width / 960;
+
+            let x = (e.clientX - rect.left) / scale;
+            let y = (e.clientY - rect.top) / scale;
+
+            x = Math.max(0, Math.min(960, x));
+            y = Math.max(0, y);
+
+            currentLine[idx] = [Math.round(x), Math.round(y)];
+            postLine();
+        });
+
+        window.addEventListener("mouseup", () => {
+            if (isDragging) {
+                isDragging = false;
+                document.body.style.cursor = "";
+                updateLine();
+            }
+        });
     }
 
     async function postLine() {
@@ -68,14 +89,20 @@
         form.append("x2", currentLine[1][0]);
         form.append("y2", currentLine[1][1]);
         await fetch("/set_line", { method: "POST", body: form });
-        updateLine();
+        positionPoints();
     }
 
+    // Инициализация
     makeDraggable(pt1, 0);
     makeDraggable(pt2, 1);
+    window.addEventListener("resize", positionPoints);
 
+    // Периодическое обновление
     setInterval(updateLine, 1000);
     setInterval(updateStatus, 1000);
+
+    // Первая инициализация после загрузки картинки
+    img.onload = updateLine;
 </script>
 </body>
 </html>

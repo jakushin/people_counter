@@ -1,35 +1,44 @@
-body {
-    background-color: #222;
-    color: #ddd;
-    font-family: Arial, sans-serif;
-    padding: 20px;
+/* static/style.css */
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
 }
 
-h2 {
-    color: #ffcc00;
+.video-container {
+    position: relative;
+    width: 100%;
+    max-width: 960px;
+    margin: 0 auto;
 }
 
-.drag-point {
-    width: 12px;
-    height: 12px;
-    background: red;
-    border-radius: 50%;
+.video-container img {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.diag {
     position: absolute;
-    cursor: grab;
-    border: 2px solid white;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    padding: 6px 10px;
+    font-family: sans-serif;
+    font-size: 14px;
+    border-radius: 4px;
     z-index: 10;
 }
 
-#video-container {
-    position: relative;
-    display: inline-block;
-}
-
-#diagnostics {
+.point {
     position: absolute;
-    top: 20px;
-    right: 20px;
-    background: rgba(0,0,0,0.5);
-    color: yellow;
-    padding: 10px;
+    width: 16px;
+    height: 16px;
+    background: rgba(255,0,0,0.8);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    cursor: grab;
+    z-index: 20;
+    user-select: none;
 }
