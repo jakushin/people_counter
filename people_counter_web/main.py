@@ -11,11 +11,11 @@ from ultralytics import YOLO
 from line_config import load_line_config, save_line_config
 from rtsp_reader import RTSPReader
 
-# Настройка логирования
+# Логирование
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Получаем RTSP_URL из окружения (формируется в start.sh)
+# RTSP URL из окружения
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
@@ -23,19 +23,17 @@ if not RTSP_URL:
 
 TARGET_WIDTH = 960
 
-# Инициализируем приложение
+# FastAPI
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Загружаем модель и конфигурацию линии
+# Модель + линия
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
 
-# Запускаем RTSP-поток
+# RTSP-поток
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
-
-# --- Роуты API ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -75,17 +73,15 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
-# При shutdown FastAPI останавливаем RTSPReader
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down RTSP reader...")
     reader.stop()
 
-# --- Точка входа при запуске через python main.py ---
 if __name__ == "__main__":
     import uvicorn
 
-    # Перехват SIGINT и SIGTERM для немедленного KeyboardInterrupt
+    # Перехват Ctrl+C
     def _signal_handler(sig, frame):
         raise KeyboardInterrupt()
 
@@ -98,7 +94,6 @@ if __name__ == "__main__":
         port=8000,
         log_level="info",
         timeout_keep_alive=1,
-        shutdown_timeout=1,
         force_exit=True,
     )
     server = uvicorn.Server(config)
