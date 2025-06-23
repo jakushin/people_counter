@@ -26,7 +26,6 @@ class RTSPReader:
         self.running = False
 
     def start(self) -> None:
-        """Запустить поток считывания."""
         if self.running:
             return
         self.running = True
@@ -34,9 +33,8 @@ class RTSPReader:
         self.thread.start()
 
     def stop(self) -> None:
-        """Остановить поток."""
         self.running = False
-        if hasattr(self, 'thread'):
+        if hasattr(self, "thread"):
             self.thread.join()
 
     def _reader_loop(self) -> None:
@@ -53,7 +51,7 @@ class RTSPReader:
                 time.sleep(0.1)
                 continue
 
-            # FPS
+            # FPS 계산
             frame_count += 1
             now = time.time()
             if now - prev_time >= 1.0:
@@ -61,12 +59,12 @@ class RTSPReader:
                 frame_count = 0
                 prev_time = now
 
-            # Resize to target width
+            # Resize
             h, w = frame.shape[:2]
-            self.frame_width, self.frame_height = w, h
             scale = self.target_width / w
             new_h = int(h * scale)
             frame = cv2.resize(frame, (self.target_width, new_h))
+            self.frame_width, self.frame_height = self.target_width, new_h
 
             # Нарисовать линию и точки
             cv2.line(frame, self.line_start, self.line_end, (0,255,0), 2)

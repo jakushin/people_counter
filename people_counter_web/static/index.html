@@ -8,7 +8,7 @@
 </head>
 <body>
 <div class="video-container">
-    <img id="video" src="/video" alt="Видео" />
+    <img id="video" src="/video" alt="Video stream" />
     <div class="diag" id="diag">
         FPS: <span id="fps">0</span><br>
         RES: <span id="res">0x0</span><br>
@@ -23,12 +23,9 @@
     const pt1 = document.getElementById("point1");
     const pt2 = document.getElementById("point2");
 
-    // Обновление позиции точек и текста линии
     async function updateLine() {
-        const res = await fetch("/get_line");
-        const { line_start, line_end } = await res.json();
+        const { line_start, line_end } = await (await fetch("/get_line")).json();
         currentLine = [line_start, line_end];
-
         const img = document.getElementById("video");
         const scale = img.clientWidth / 960;
         pt1.style.left = (line_start[0]*scale - 8) + "px";
@@ -38,15 +35,12 @@
         document.getElementById("line").innerText = `${line_start} → ${line_end}`;
     }
 
-    // Обновление FPS и разрешения
     async function updateStatus() {
-        const res = await fetch("/get_status");
-        const data = await res.json();
+        const data = await (await fetch("/get_status")).json();
         document.getElementById("fps").innerText = data.fps;
         document.getElementById("res").innerText = data.frame_size;
     }
 
-    // Drag'n'drop точек
     function makeDraggable(el, idx) {
         el.onmousedown = e => {
             e.preventDefault();

@@ -1,5 +1,7 @@
 # main.py
 import logging
+import os
+
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,47 +13,56 @@ from rtsp_reader import RTSPReader
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+# RTSP URL собирается в вашем start.sh
+RTSP_URL = os.getenv("RTSP_URL")
+if not RTSP_URL:
+    logger.error("RTSP_URL не задан в окружении")
+    raise SystemExit(1)
 
-# Настройки
-RTSP_URL     = "rtsp://<user>:<pass>@<camera-ip>/stream"
 TARGET_WIDTH = 960
 
-# Подгружаем модель и конфиг линий
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Инициализация модели и линии
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
-
-# Инициализируем RTSP reader и монтируем статику
-rtsp_reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
-rtsp_reader.start()
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
+reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
+reader.start()
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return HTMLResponse(open("static/index.html", "r", encoding="utf-8").read())
+    return HTMLResponse(open("static/index.html", encoding="utf-8").read())
 
 @app.get("/video")
 def video_feed():
-    return StreamingResponse(rtsp_reader.frame_generator(),
-                             media_type="multipart/x-mixed-replace; boundary=frame")
+    return StreamingResponse(
+        reader.frame_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
 
 @app.get("/get_line")
 async def get_line():
-    start, end = rtsp_reader.line_start, rtsp_reader.line_end
-    return JSONResponse({"line_start": start, "line_end": end})
+    return JSONResponse({
+        "line_start": reader.line_start,
+        "line_end":   reader.line_end
+    })
 
 @app.post("/set_line")
 async def set_line(
     x1: int = Form(...), y1: int = Form(...),
     x2: int = Form(...), y2: int = Form(...)
 ):
-    rtsp_reader.line_start = (x1, y1)
-    rtsp_reader.line_end   = (x2, y2)
-    save_line_config(rtsp_reader.line_start, rtsp_reader.line_end)
+    reader.line_start = (x1, y1)
+    reader.line_end   = (x2, y2)
+    save_line_config(reader.line_start, reader.line_end)
     return {"status": "ok"}
 
 @app.get("/get_status")
 async def get_status():
-    size = f"{rtsp_reader.frame_width}x{rtsp_reader.frame_height}"
-    return {"frame_size": size, "fps": round(rtsp_reader.fps, 2)}
+    size = f"{reader.frame_width}x{reader.frame_height}"
+    return {"frame_size": size, "fps": round(reader.fps, 2)}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000)
