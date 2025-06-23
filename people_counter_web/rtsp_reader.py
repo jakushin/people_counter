@@ -1,4 +1,3 @@
-# rtsp_reader.py (итоговый)
 import cv2
 import threading
 import time
@@ -51,7 +50,7 @@ class RTSPReader:
                 time.sleep(0.1)
                 continue
 
-            # расчёт FPS
+            # FPS
             frame_count += 1
             now = time.time()
             if now - prev_time >= 1.0:
@@ -59,20 +58,20 @@ class RTSPReader:
                 frame_count = 0
                 prev_time = now
 
-            # ресайз под ширину
+            # Resize
             h, w = frame.shape[:2]
             scale = self.target_width / w
             new_h = int(h * scale)
             frame = cv2.resize(frame, (self.target_width, new_h))
             self.frame_width, self.frame_height = self.target_width, new_h
 
-            # поток без наложения линии (линия в HTML)
+            # Никаких линий/точек — это делается в браузере
             self.frame = frame
 
         cap.release()
 
     def frame_generator(self):
-        """JPEG-генератор для StreamingResponse."""
+        """Генератор JPEG-кадров для StreamingResponse."""
         while True:
             if self.frame is None:
                 time.sleep(0.05)

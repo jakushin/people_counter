@@ -1,4 +1,3 @@
-# main.py
 import logging
 import os
 
@@ -13,7 +12,7 @@ from rtsp_reader import RTSPReader
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# RTSP URL собирается в вашем start.sh
+# RTSP_URL формируется в start.sh
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
@@ -24,9 +23,10 @@ TARGET_WIDTH = 960
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Инициализация модели и линии
+# Модель и координаты
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
+
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
 
