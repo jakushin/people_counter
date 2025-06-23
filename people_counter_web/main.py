@@ -1,7 +1,7 @@
 import logging
 import os
-import signal
 import sys
+import signal
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -24,13 +24,14 @@ TARGET_WIDTH = 960
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Загрузка модели и конфигурации линии
+# === Инициализация модели и RTSPReader ===
+
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
-
-# Запуск RTSP-потока
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
+
+# === Роуты ===
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -70,18 +71,37 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
-# Хук для корректной остановки RTSPReader
+# === Остановка RTSPReader при shutdown ===
+
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down RTSP reader...")
     reader.stop()
 
+# === Запуск приложения ===
+
 if __name__ == "__main__":
     import uvicorn
-    # Обработаем SIGINT/SIGTERM так, чтобы uvicorn сразу шел в shutdown
-    def handle_exit(sig, frame):
-        raise KeyboardInterrupt()
-    signal.signal(signal.SIGINT, handle_exit)
-    signal.signal(signal.SIGTERM, handle_exit)
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    # Перехватываем SIGINT/SIGTERM, чтобы uvicorn шел в shutdown сразу
+    def _signal_handler(sig, frame):
+        raise KeyboardInterrupt()
+
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    try:
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            timeout_keep_alive=1,       # сократим время ожидания клиентских keep-alive
+            shutdown_timeout=1          # минимальное время graceful shutdown
+        )
+    except KeyboardInterrupt:
+        # при Ctrl+C тут окажемся сразу
+        logger.info("Keyboard interrupt received, exiting...")
+        # станем уверены, что поток закрыт
+        reader.stop()
+        sys.exit(0)
