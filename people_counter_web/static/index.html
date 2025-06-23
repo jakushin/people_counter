@@ -1,88 +1,100 @@
-<!-- static/index.html (добавлено SVG-rect и 4 «ручки») -->
-<!DOCTYPE html><html><head>
-    <meta charset="UTF-8">
-    <title>People Counter</title>
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>People Counter</title>
     <link rel="stylesheet" href="/static/style.css">
 </head><body>
 <div class="video-container" id="container">
-    <img id="video" src="/video">
+    <img id="video" src="/video" alt="">
     <svg id="overlay"></svg>
-    <!-- handles for ROI corners -->
-    <div id="h1" class="handle"></div>
-    <div id="h2" class="handle"></div>
-    <div id="h3" class="handle"></div>
-    <div id="h4" class="handle"></div>
-    <div class="diag" id="diag">…</div>
+    <div class="diag">
+        <div>FPS: <span id="fps">0</span></div>
+        <div>DISP: <span id="res_disp">0×0</span></div>
+        <div>SR: <span id="res_stream">0×0</span></div>
+        <div>BR: <span id="br">0</span> kbps</div>
+        <div>COORD: <span id="coords">—</span></div>
+    </div>
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
 </div>
 <script>
     const container = document.getElementById("container");
-    const img       = document.getElementById("video");
-    const overlay   = document.getElementById("overlay");
-    const rectEl    = document.createElementNS("http://www.w3.org/2000/svg","rect");
-    overlay.appendChild(rectEl);
+    const img = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const lineEl = document.createElementNS("http://www.w3.org/2000/svg","line");
+    overlay.appendChild(lineEl);
 
-    const handles = ["h1","h2","h3","h4"].map(id=>document.getElementById(id));
-    let region = [50,50,300,300]; // [x1,y1,x2,y2]
-    // load saved region
-    async function loadRegion(){
-        const {region: r} = await (await fetch("/get_region")).json();
-        if(r) region = r;
-    }
+    const pt1 = document.getElementById("point1");
+    const pt2 = document.getElementById("point2");
+    const elFps = document.getElementById("fps");
+    const elDisp = document.getElementById("res_disp");
+    const elSR = document.getElementById("res_stream");
+    const elBr = document.getElementById("br");
+    const elCoord = document.getElementById("coords");
 
-    function resizeAll(){
+    let currentLine = [[0,0],[0,0]];
+
+    function resize() {
         const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        overlay.setAttribute("width",cr.width); overlay.setAttribute("height",cr.height);
+        overlay.setAttribute("width",cr.width);
+        overlay.setAttribute("height",cr.height);
         overlay.style.width=cr.width+"px"; overlay.style.height=cr.height+"px";
-        // rect
-        rectEl.setAttribute("x",region[0]*scale);
-        rectEl.setAttribute("y",region[1]*scale);
-        rectEl.setAttribute("width",(region[2]-region[0])*scale);
-        rectEl.setAttribute("height",(region[3]-region[1])*scale);
-        rectEl.setAttribute("stroke","lime"); rectEl.setAttribute("fill","none"); rectEl.setAttribute("stroke-width",2);
-        // handles
-        handles.forEach((h,i)=>{
-            const [x,y] = [
-                i%2? region[2] : region[0],
-                i>1? region[3] : region[1]
-            ];
-            h.style.left = cr.left + x*scale - h.offsetWidth/2 + "px";
-            h.style.top  = cr.top  + y*scale - h.offsetHeight/2 + "px";
-        });
+        draw(); position();
     }
 
-    // drag handles
-    handles.forEach((h,idx)=>{
+    function draw(){
+        const cr = container.getBoundingClientRect(), scale=cr.width/960;
+        const [p1,p2]=currentLine;
+        lineEl.setAttribute("x1",p1[0]*scale);
+        lineEl.setAttribute("y1",p1[1]*scale);
+        lineEl.setAttribute("x2",p2[0]*scale);
+        lineEl.setAttribute("y2",p2[1]*scale);
+    }
+    function position(){
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
+        const [p1,p2]=currentLine;
+        pt1.style.left=(p1[0]*scale-8)+"px"; pt1.style.top=(p1[1]*scale-8)+"px";
+        pt2.style.left=(p2[0]*scale-8)+"px"; pt2.style.top=(p2[1]*scale-8)+"px";
+    }
+
+    async function update(){
+        const line = await (await fetch("/get_line")).json();
+        currentLine=[line.line_start,line.line_end];
+        elCoord.innerText=`${line.line_start} → ${line.line_end}`;
+        const stat=await (await fetch("/get_status")).json();
+        elFps.innerText=stat.fps; elDisp.innerText=stat.resolution_disp;
+        elSR.innerText=stat.resolution_stream; elBr.innerText=stat.bitrate;
+        draw(); position();
+    }
+
+    function makeDraggable(el,idx){
         let drag=false;
-        h.onmousedown = e=>{e.preventDefault(); drag=true;document.body.style.cursor="grabbing";}
-        window.onmousemove = e=>{
-            if(!drag) return;
-            const cr=container.getBoundingClientRect(), scale=cr.width/960;
+        el.onmousedown=e=>{e.preventDefault();drag=true;document.body.style.cursor="grabbing";};
+        window.onmousemove=e=>{
+            if(!drag)return;
+            const cr=container.getBoundingClientRect(),scale=cr.width/960;
             let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
-            x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(540,y));
-            // update region corner
-            if(idx%2) region[2]=Math.round(x); else region[0]=Math.round(x);
-            if(idx>1) region[3]=Math.round(y); else region[1]=Math.round(y);
-            resizeAll();
+            x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(cr.height/scale,y));
+            currentLine[idx]=[Math.round(x),Math.round(y)];
+            draw(); position();
         };
-        window.onmouseup = async ()=>{
-            if(drag){ drag=false; document.body.style.cursor="";
-                // save
+        window.onmouseup=async()=>{
+            if(drag){drag=false;document.body.style.cursor="";
                 const form=new FormData();
-                form.append("x1",region[0]);form.append("y1",region[1]);
-                form.append("x2",region[2]);form.append("y2",region[3]);
-                await fetch("/set_region",{method:"POST",body:form});
+                form.append("x1",currentLine[0][0]);form.append("y1",currentLine[0][1]);
+                form.append("x2",currentLine[1][0]);form.append("y2",currentLine[1][1]);
+                await fetch("/set_line",{method:"POST",body:form});
+                update();
             }
         };
-    });
+    }
 
-    // init
-    img.onload = async ()=>{
-        await loadRegion();
-        resizeAll();
-        // existing init for line & diag...
+    makeDraggable(pt1,0);
+    makeDraggable(pt2,1);
+    window.onresize=resize;
+    img.onload=()=>{
+        resize();
+        update();
+        setInterval(update,1000);
     };
-    window.onresize = resizeAll;
 </script>
 </body></html>

@@ -1,15 +1,13 @@
-# rtsp_reader.py
 import cv2
 import threading
 import time
 from ultralytics import YOLO
 
 class RTSPReader:
-    def __init__(self, url, line_start, line_end, region, target_width, model):
+    def __init__(self, url, line_start, line_end, target_width, model):
         self.url = url
         self.line_start = line_start
         self.line_end = line_end
-        self.region = region  # either None or (x1,y1,x2,y2)
         self.target_width = target_width
         self.model = model
 
@@ -23,7 +21,8 @@ class RTSPReader:
         self.running = False
 
     def start(self):
-        if self.running: return
+        if self.running:
+            return
         self.running = True
         self.thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.thread.start()
@@ -36,35 +35,37 @@ class RTSPReader:
     def _reader_loop(self):
         cap = cv2.VideoCapture(self.url)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open stream: {self.url}")
+            raise RuntimeError(f"Cannot open RTSP stream: {self.url}")
+        # исходное разрешение
         self.src_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        prev = time.time(); cnt=0
+        prev = time.time()
+        cnt = 0
         while self.running:
             ret, frame = cap.read()
             if not ret:
-                time.sleep(0.1); continue
+                time.sleep(0.1)
+                continue
 
             # FPS
-            cnt+=1; now=time.time()
-            if now-prev>=1.0:
-                self.fps = cnt/(now-prev); cnt=0; prev=now
+            cnt += 1
+            now = time.time()
+            if now - prev >= 1.0:
+                self.fps = cnt / (now - prev)
+                cnt = 0
+                prev = now
 
-            # Apply ROI if set
-            if self.region:
-                x1,y1,x2,y2 = self.region
-                frame = frame[y1:y2, x1:x2]
-
-            # Resize display
-            h,w = frame.shape[:2]
-            scale = self.target_width/w
-            nh = int(h*scale)
-            disp = cv2.resize(frame,(self.target_width,nh))
+            # ресайз
+            h, w = frame.shape[:2]
+            scale = self.target_width / w
+            nh = int(h * scale)
+            disp = cv2.resize(frame, (self.target_width, nh))
             self.frame_width, self.frame_height = self.target_width, nh
 
-            # draw line
-            cv2.line(disp, self.line_start, self.line_end, (0,255,0),2)
+            # рисуем линию
+            cv2.line(disp, self.line_start, self.line_end, (0,255,0), 2)
+
             self.frame = disp
 
         cap.release()
@@ -72,10 +73,16 @@ class RTSPReader:
     def frame_generator(self):
         while True:
             if self.frame is None:
-                time.sleep(0.05); continue
-            ret,j = cv2.imencode('.jpg', self.frame)
-            if not ret: continue
-            data = j.tobytes()
-            self.bitrate = len(data)*self.fps*8/1000
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n'+data+b'\r\n')
+                time.sleep(0.05)
+                continue
+            ret, jpeg = cv2.imencode('.jpg', self.frame)
+            if not ret:
+                continue
+            data = jpeg.tobytes()
+            self.bitrate = len(data) * self.fps * 8 / 1000
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' +
+                data +
+                b'\r\n'
+            )
