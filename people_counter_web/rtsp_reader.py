@@ -1,10 +1,18 @@
+# rtsp_reader.py
 import cv2
 import threading
 import time
-import logging
+from ultralytics import YOLO
 
 class RTSPReader:
-    def __init__(self, url, line_start, line_end, target_width, model):
+    def __init__(
+        self,
+        url: str,
+        line_start: tuple[int,int],
+        line_end: tuple[int,int],
+        target_width: int,
+        model: YOLO,
+    ):
         self.url = url
         self.line_start = line_start
         self.line_end = line_end
@@ -12,29 +20,29 @@ class RTSPReader:
         self.model = model
 
         self.frame = None
+        self.fps = 0.0
+        self.frame_width = target_width
+        self.frame_height = 0
         self.running = False
 
-        self.fps = 0.0
-        self.frame_width = 0
-        self.frame_height = 0
-
-    def start(self):
+    def start(self) -> None:
+        """Запустить поток считывания."""
+        if self.running:
+            return
         self.running = True
-        self.thread = threading.Thread(target=self._reader_thread, daemon=True)
+        self.thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.thread.start()
 
-    def stop(self):
+    def stop(self) -> None:
+        """Остановить поток."""
         self.running = False
         if hasattr(self, 'thread'):
             self.thread.join()
 
-    def _reader_thread(self):
+    def _reader_loop(self) -> None:
         cap = cv2.VideoCapture(self.url)
         if not cap.isOpened():
-            logging.error(f"Failed to open RTSP stream: {self.url}")
-            return
-
-        logging.info(f"RTSP stream opened successfully: {self.url}")
+            raise RuntimeError(f"Cannot open RTSP stream: {self.url}")
 
         prev_time = time.time()
         frame_count = 0
@@ -42,10 +50,10 @@ class RTSPReader:
         while self.running:
             ret, frame = cap.read()
             if not ret:
-                logging.warning("Frame not read")
                 time.sleep(0.1)
                 continue
 
+            # FPS
             frame_count += 1
             now = time.time()
             if now - prev_time >= 1.0:
@@ -53,41 +61,34 @@ class RTSPReader:
                 frame_count = 0
                 prev_time = now
 
-            # Resize
-            height, width = frame.shape[:2]
-            self.frame_width = width
-            self.frame_height = height
-            scale = self.target_width / width
-            new_height = int(height * scale)
-            frame_resized = cv2.resize(frame, (self.target_width, new_height))
+            # Resize to target width
+            h, w = frame.shape[:2]
+            self.frame_width, self.frame_height = w, h
+            scale = self.target_width / w
+            new_h = int(h * scale)
+            frame = cv2.resize(frame, (self.target_width, new_h))
 
-            # Draw line + points
-            cv2.line(frame_resized, self.line_start, self.line_end, (0, 255, 0), 2)
-            cv2.circle(frame_resized, self.line_start, 8, (0, 0, 255), -1)
-            cv2.circle(frame_resized, self.line_end, 8, (0, 0, 255), -1)
+            # Нарисовать линию и точки
+            cv2.line(frame, self.line_start, self.line_end, (0,255,0), 2)
+            cv2.circle(frame, self.line_start, 8, (0,0,255), -1)
+            cv2.circle(frame, self.line_end, 8, (0,0,255), -1)
 
-            # Add diagnostics
-            diag_text = f"FPS: {self.fps:.2f}\nRES: {self.frame_width}x{self.frame_height}\nLine: {self.line_start}-{self.line_end}"
-            y_offset = 20
-            for line in diag_text.split('\n'):
-                cv2.putText(frame_resized, line, (self.target_width - 400, y_offset),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-                y_offset += 25
-
-            self.frame = frame_resized
+            self.frame = frame
 
         cap.release()
-        logging.info("RTSP reader stopped")
 
     def frame_generator(self):
+        """Генератор JPEG-кадров для StreamingResponse."""
         while True:
             if self.frame is None:
                 time.sleep(0.05)
                 continue
-
             ret, jpeg = cv2.imencode('.jpg', self.frame)
             if not ret:
                 continue
-
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' +
+                jpeg.tobytes() +
+                b'\r\n'
+            )
