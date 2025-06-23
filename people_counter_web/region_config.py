@@ -1,9 +1,9 @@
+# region_config.py
 import json
 import os
 
 REGION_CONFIG_FILE = "region_config.json"
-# Если файла нет — работаем на всём кадре
-DEFAULT_REGION = None
+DEFAULT_REGION = (100,100,200,200)  # если нет файла, рисуем 100×100 сбоку
 
 def load_region_config():
     if os.path.exists(REGION_CONFIG_FILE):

@@ -1,3 +1,4 @@
+/* static/style.css */
 .video-container { position: relative; max-width: 960px; margin: auto; }
 .video-container img { width: 100%; display: block; }
 .diag {
@@ -12,10 +13,13 @@
     cursor: grab; z-index: 30; user-select: none;
 }
 svg#overlay { position: absolute; top:0; left:0; z-index:25; pointer-events: none; }
-svg#overlay line { stroke: lime; stroke-width:2; }
-/* Ручки для ROI */
+svg#overlay line,
+svg#overlay rect { stroke-width:2; fill: none; }
+svg#overlay line { stroke: lime; }
+svg#overlay rect { stroke: cyan; }
+/* Ручки */
 .handle {
     position: absolute; width: 12px; height: 12px;
-    background: rgba(0,255,0,0.8); border:2px solid #fff; border-radius:50%;
-    cursor: grab; z-index: 35; user-select: none;
+    background: rgba(0,255,0,0.8); border:2px solid #fff;
+    border-radius:50%; cursor: grab; z-index:35; user-select:none;
 }

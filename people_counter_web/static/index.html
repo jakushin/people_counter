@@ -1,3 +1,4 @@
+<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,7 +8,7 @@
 </head>
 <body>
 <div class="video-container" id="container">
-    <img id="video" src="/video" alt="Video stream" />
+    <img id="video" src="/video" />
     <svg id="overlay"></svg>
 
     <div class="diag" id="diag">
@@ -19,10 +20,8 @@
         <div>REGION: <span id="region">—</span></div>
     </div>
 
-    <!-- Точки линии -->
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
-    <!-- Ручки ROI -->
     <div id="h1" class="handle"></div>
     <div id="h2" class="handle"></div>
     <div id="h3" class="handle"></div>
@@ -31,166 +30,141 @@
 
 <script>
     const container = document.getElementById("container");
-    const img       = document.getElementById("video");
-    const overlay   = document.getElementById("overlay");
-    const lineEl    = document.createElementNS("http://www.w3.org/2000/svg","line");
+    const img = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+
+    const lineEl = document.createElementNS("http://www.w3.org/2000/svg","line");
+    const rectEl = document.createElementNS("http://www.w3.org/2000/svg","rect");
+    overlay.appendChild(rectEl);
     overlay.appendChild(lineEl);
 
-    const pts = [document.getElementById("point1"), document.getElementById("point2")];
+    const pts     = [document.getElementById("point1"), document.getElementById("point2")];
     const handles = ["h1","h2","h3","h4"].map(id=>document.getElementById(id));
-    const elFps     = document.getElementById("fps");
-    const elDisp    = document.getElementById("res_disp");
-    const elSR      = document.getElementById("res_stream");
-    const elBr      = document.getElementById("br");
-    const elCoord   = document.getElementById("coords");
-    const elRegion  = document.getElementById("region");
+    const elFps   = document.getElementById("fps");
+    const elDisp  = document.getElementById("res_disp");
+    const elSR    = document.getElementById("res_stream");
+    const elBr    = document.getElementById("br");
+    const elCoord = document.getElementById("coords");
+    const elReg   = document.getElementById("region");
 
     let currentLine = [[0,0],[0,0]];
-    let draggingLineIdx = null;
+    let dragLineIdx = null;
 
-    let region = [0,0,960,540];  // дефолт — весь кадр
-    let draggingHandleIdx = null;
+    let region = [100,100,200,200];
+    let dragHandleIdx = null;
 
-    function resizeOverlay(){
+    function resizeOverlay() {
         const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        overlay.setAttribute("width",cr.width);
+        overlay.setAttribute("width", cr.width);
         overlay.setAttribute("height",cr.height);
         overlay.style.width=cr.width+"px"; overlay.style.height=cr.height+"px";
-        drawLine(); positionPoints(); drawRegion(); positionHandles();
+        drawLine(); positionPts();
+        drawRect(); positionHandles();
     }
-
     function drawLine(){
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        const [p1,p2] = currentLine;
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
+        const [p1,p2]=currentLine;
         lineEl.setAttribute("x1",p1[0]*scale);
         lineEl.setAttribute("y1",p1[1]*scale);
         lineEl.setAttribute("x2",p2[0]*scale);
         lineEl.setAttribute("y2",p2[1]*scale);
-        lineEl.setAttribute("stroke","lime");
-        lineEl.setAttribute("stroke-width","2");
     }
-
-    function positionPoints(){
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        currentLine.forEach((p,idx)=>{
-            pts[idx].style.left = (p[0]*scale - 8) + "px";
-            pts[idx].style.top  = (p[1]*scale - 8) + "px";
+    function positionPts(){
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
+        currentLine.forEach((p,i)=>{
+            pts[i].style.left=(p[0]*scale-8)+"px";
+            pts[i].style.top =(p[1]*scale-8)+"px";
         });
     }
-
-    // ROI rectangle
-    const rectEl = document.createElementNS("http://www.w3.org/2000/svg","rect");
-    overlay.appendChild(rectEl);
-
-    function drawRegion(){
-        const cr=container.getBoundingClientRect(), scale=cr.width/960;
-        const [x1,y1,x2,y2] = region;
-        rectEl.setAttribute("x", x1*scale);
-        rectEl.setAttribute("y", y1*scale);
-        rectEl.setAttribute("width", (x2-x1)*scale);
+    function drawRect(){
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
+        const [x1,y1,x2,y2]=region;
+        rectEl.setAttribute("x",x1*scale);
+        rectEl.setAttribute("y",y1*scale);
+        rectEl.setAttribute("width",(x2-x1)*scale);
         rectEl.setAttribute("height",(y2-y1)*scale);
-        rectEl.setAttribute("stroke","cyan");
-        rectEl.setAttribute("fill","none");
-        rectEl.setAttribute("stroke-width","2");
-        elRegion.innerText = `[${x1},${y1},${x2},${y2}]`;
+        elReg.innerText=`[${x1},${y1},${x2},${y2}]`;
     }
-
     function positionHandles(){
-        const cr=container.getBoundingClientRect(), scale=cr.width/960;
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
         handles.forEach((h,i)=>{
-            const cx = (i%2? region[2] : region[0]) * scale;
-            const cy = (i>1? region[3] : region[1]) * scale;
-            h.style.left = (cr.left + cx - h.offsetWidth/2) + "px";
-            h.style.top  = (cr.top  + cy - h.offsetHeight/2)+ "px";
+            const cx=(i%2?region[2]:region[0])*scale;
+            const cy=(i>1?region[3]:region[1])*scale;
+            h.style.left=(cr.left+cx-h.offsetWidth/2)+"px";
+            h.style.top =(cr.top +cy-h.offsetHeight/2)+"px";
         });
     }
 
-    // Update data from server
     async function updateAll(){
-        // линия
-        const lineRes = await fetch("/get_line");
-        const { line_start, line_end } = await lineRes.json();
-        currentLine = [line_start, line_end];
-        elCoord.innerText = `${line_start} → ${line_end}`;
-        // статус
-        const stat = await (await fetch("/get_status")).json();
-        elFps.innerText       = stat.fps;
-        elDisp.innerText     = stat.resolution_disp;
-        elSR.innerText       = stat.resolution_stream;
-        elBr.innerText       = stat.bitrate;
-        // region
-        const regRes = await fetch("/get_region");
-        const { region: r } = await regRes.json();
-        if(r) region = r;
-        // redraw
-        drawLine(); positionPoints();
-        drawRegion(); positionHandles();
+        const {line_start,line_end}=await (await fetch("/get_line")).json();
+        currentLine=[line_start,line_end];
+        elCoord.innerText=`${line_start} → ${line_end}`;
+        const stat=await (await fetch("/get_status")).json();
+        elFps.innerText=stat.fps; elDisp.innerText=stat.resolution_disp;
+        elSR.innerText=stat.resolution_stream; elBr.innerText=stat.bitrate;
+        const {region: r}=await (await fetch("/get_region")).json();
+        region = r||region;
+        drawLine(); positionPts(); drawRect(); positionHandles();
     }
 
-    // Drag line points
-    pts.forEach((el, idx)=>{
-        el.addEventListener("mousedown", e=>{
-            e.preventDefault();
-            draggingLineIdx = idx;
-            document.body.style.cursor="grabbing";
+    // Line drag
+    pts.forEach((el,idx)=>{
+        el.addEventListener("mousedown",e=>{
+            e.preventDefault(); dragLineIdx=idx; document.body.style.cursor="grabbing";
         });
     });
-    window.addEventListener("mousemove", e=>{
-        if(draggingLineIdx===null) return;
-        const cr=container.getBoundingClientRect(), scale=cr.width/960;
+    window.addEventListener("mousemove",e=>{
+        if(dragLineIdx===null) return;
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
         let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
         x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(cr.height/scale,y));
-        currentLine[draggingLineIdx]=[Math.round(x),Math.round(y)];
-        drawLine(); positionPoints();
+        currentLine[dragLineIdx]=[Math.round(x),Math.round(y)];
+        drawLine(); positionPts();
     });
-    window.addEventListener("mouseup", async ()=>{
-        if(draggingLineIdx!==null){
+    window.addEventListener("mouseup",async()=>{
+        if(dragLineIdx!==null){
             document.body.style.cursor="";
             const [p1,p2]=currentLine;
             const f=new FormData();
             f.append("x1",p1[0]);f.append("y1",p1[1]);
             f.append("x2",p2[0]);f.append("y2",p2[1]);
             await fetch("/set_line",{method:"POST",body:f});
-            draggingLineIdx=null;
+            dragLineIdx=null;
         }
     });
 
-    // Drag ROI handles
-    handles.forEach((h, idx)=>{
-        h.addEventListener("mousedown", e=>{
-            e.preventDefault();
-            draggingHandleIdx = idx;
-            document.body.style.cursor="grabbing";
+    // ROI drag
+    handles.forEach((h,i)=>{
+        h.addEventListener("mousedown",e=>{
+            e.preventDefault(); dragHandleIdx=i; document.body.style.cursor="grabbing";
         });
     });
-    window.addEventListener("mousemove", e=>{
-        if(draggingHandleIdx===null) return;
-        const cr=container.getBoundingClientRect(), scale=cr.width/960;
+    window.addEventListener("mousemove",e=>{
+        if(dragHandleIdx===null) return;
+        const cr=container.getBoundingClientRect(),scale=cr.width/960;
         let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
         x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(cr.height/scale,y));
-        if(draggingHandleIdx%2) region[2]=Math.round(x);
-        else region[0]=Math.round(x);
-        if(draggingHandleIdx>1) region[3]=Math.round(y);
-        else region[1]=Math.round(y);
-        drawRegion(); positionHandles();
+        if(dragHandleIdx%2) region[2]=Math.round(x); else region[0]=Math.round(x);
+        if(dragHandleIdx>1) region[3]=Math.round(y); else region[1]=Math.round(y);
+        drawRect(); positionHandles();
     });
-    window.addEventListener("mouseup", async ()=>{
-        if(draggingHandleIdx!==null){
+    window.addEventListener("mouseup",async()=>{
+        if(dragHandleIdx!==null){
             document.body.style.cursor="";
             const [x1,y1,x2,y2]=region;
             const f=new FormData();
             f.append("x1",x1);f.append("y1",y1);
             f.append("x2",x2);f.append("y2",y2);
             await fetch("/set_region",{method:"POST",body:f});
-            draggingHandleIdx=null;
+            dragHandleIdx=null;
         }
     });
 
-    window.addEventListener("resize", resizeOverlay);
-    img.onload = ()=>{
+    window.addEventListener("resize",resizeOverlay);
+    img.onload=()=>{
         resizeOverlay();
         updateAll();
-        setInterval(updateAll, 1000);
+        setInterval(updateAll,1000);
     };
 </script>
 </body>

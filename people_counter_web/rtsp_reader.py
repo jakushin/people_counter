@@ -1,16 +1,16 @@
+# rtsp_reader.py
 import cv2
 import threading
 import time
 from ultralytics import YOLO
 
 class RTSPReader:
-    def __init__(self, url, line_start, line_end, target_width, model, region=None):
+    def __init__(self, url, line_start, line_end, target_width, model):
         self.url = url
         self.line_start = line_start
         self.line_end = line_end
         self.target_width = target_width
         self.model = model
-        self.region = region  # (x1,y1,x2,y2) or None
 
         self.frame = None
         self.fps = 0.0
@@ -22,8 +22,7 @@ class RTSPReader:
         self.running = False
 
     def start(self):
-        if self.running:
-            return
+        if self.running: return
         self.running = True
         self.thread = threading.Thread(target=self._reader_loop, daemon=True)
         self.thread.start()
@@ -44,30 +43,21 @@ class RTSPReader:
         while self.running:
             ret, frame = cap.read()
             if not ret:
-                time.sleep(0.1)
-                continue
+                time.sleep(0.1); continue
 
-            # FPS
             cnt += 1
             now = time.time()
             if now - prev >= 1.0:
                 self.fps = cnt / (now - prev)
-                cnt = 0
-                prev = now
+                cnt = 0; prev = now
 
-            # Применяем ROI, если задана
-            if self.region:
-                x1, y1, x2, y2 = self.region
-                frame = frame[y1:y2, x1:x2]
-
-            # Resize для отображения
             h, w = frame.shape[:2]
             scale = self.target_width / w
             nh = int(h * scale)
             disp = cv2.resize(frame, (self.target_width, nh))
             self.frame_width, self.frame_height = self.target_width, nh
 
-            # **Линию не рисуем здесь**, всё в браузере
+            # **Не трогаем disp** — ROI и линия рендерятся в браузере
             self.frame = disp
 
         cap.release()
@@ -75,13 +65,10 @@ class RTSPReader:
     def frame_generator(self):
         while True:
             if self.frame is None:
-                time.sleep(0.05)
-                continue
+                time.sleep(0.05); continue
             ret, jpeg = cv2.imencode('.jpg', self.frame)
-            if not ret:
-                continue
+            if not ret: continue
             data = jpeg.tobytes()
-            # bitrate в kbps
             self.bitrate = len(data) * self.fps * 8 / 1000
             yield (
                 b'--frame\r\n'
