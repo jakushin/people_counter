@@ -1,3 +1,4 @@
+# main.py
 import logging, os, sys, signal
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -12,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
-    logger.error("RTSP_URL not set")
-    sys.exit(1)
+    logger.error("RTSP_URL not set"); sys.exit(1)
 
 TARGET_WIDTH = 960
 
@@ -57,14 +57,15 @@ async def get_status():
     })
 
 @app.on_event("shutdown")
-def shutdown_event():
+def on_shutdown():
     reader.stop()
 
 if __name__ == "__main__":
     import uvicorn
-    def _sig(sig, frame):
-        raise KeyboardInterrupt()
+    def _sig(sig,frame): raise KeyboardInterrupt()
     signal.signal(signal.SIGINT, _sig)
     signal.signal(signal.SIGTERM, _sig)
-    uvicorn.run("main:app", host="0.0.0.0", port=8000,
+
+    uvicorn.run("main:app",
+                host="0.0.0.0", port=8000,
                 log_level="warning", access_log=False, timeout_keep_alive=1)

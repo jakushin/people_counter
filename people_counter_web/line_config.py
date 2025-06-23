@@ -1,3 +1,4 @@
+# line_config.py
 import json
 import os
 
@@ -8,8 +9,8 @@ DEFAULT_END   = (500, 310)
 def load_line_config():
     if os.path.exists(LINE_CONFIG_FILE):
         with open(LINE_CONFIG_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return tuple(data[0]), tuple(data[1])
+            a, b = json.load(f)
+            return tuple(a), tuple(b)
     return DEFAULT_START, DEFAULT_END
 
 def save_line_config(start, end):

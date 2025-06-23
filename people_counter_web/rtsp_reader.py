@@ -1,3 +1,4 @@
+# rtsp_reader.py
 import cv2
 import threading
 import time
@@ -35,8 +36,7 @@ class RTSPReader:
     def _reader_loop(self):
         cap = cv2.VideoCapture(self.url)
         if not cap.isOpened():
-            raise RuntimeError(f"Cannot open RTSP stream: {self.url}")
-        # исходное разрешение
+            raise RuntimeError(f"Cannot open RTSP: {self.url}")
         self.src_width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
@@ -56,16 +56,14 @@ class RTSPReader:
                 cnt = 0
                 prev = now
 
-            # ресайз
+            # Resize for display
             h, w = frame.shape[:2]
             scale = self.target_width / w
             nh = int(h * scale)
             disp = cv2.resize(frame, (self.target_width, nh))
             self.frame_width, self.frame_height = self.target_width, nh
 
-            # рисуем линию
-            cv2.line(disp, self.line_start, self.line_end, (0,255,0), 2)
-
+            # **Больше не рисуем линию здесь** — всё в браузере
             self.frame = disp
 
         cap.release()
