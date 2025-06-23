@@ -28,5 +28,5 @@ fi
 # Формирование RTSP URL
 export RTSP_URL="rtsp://${user}:${password}@${host}:${port}/axis-media/media.amp?streamprofile=${profile}"
 
-# Запуск приложения
-uvicorn main:app --host 0.0.0.0 --port 8000 --log-level warning
+# Запуск приложения через Python, чтобы использовать встроенный uvicorn с force_exit
+exec python main.py

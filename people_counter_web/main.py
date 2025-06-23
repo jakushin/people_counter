@@ -11,9 +11,11 @@ from ultralytics import YOLO
 from line_config import load_line_config, save_line_config
 from rtsp_reader import RTSPReader
 
+# Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
+# Получаем RTSP_URL из окружения (формируется в start.sh)
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
@@ -21,17 +23,19 @@ if not RTSP_URL:
 
 TARGET_WIDTH = 960
 
+# Инициализируем приложение
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# === Инициализация модели и RTSPReader ===
-
+# Загружаем модель и конфигурацию линии
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
+
+# Запускаем RTSP-поток
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
 
-# === Роуты ===
+# --- Роуты API ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -71,37 +75,37 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
-# === Остановка RTSPReader при shutdown ===
-
+# При shutdown FastAPI останавливаем RTSPReader
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down RTSP reader...")
     reader.stop()
 
-# === Запуск приложения ===
-
+# --- Точка входа при запуске через python main.py ---
 if __name__ == "__main__":
     import uvicorn
 
-    # Перехватываем SIGINT/SIGTERM, чтобы uvicorn шел в shutdown сразу
+    # Перехват SIGINT и SIGTERM для немедленного KeyboardInterrupt
     def _signal_handler(sig, frame):
         raise KeyboardInterrupt()
 
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    config = uvicorn.Config(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        log_level="info",
+        timeout_keep_alive=1,
+        shutdown_timeout=1,
+        force_exit=True,
+    )
+    server = uvicorn.Server(config)
+
     try:
-        uvicorn.run(
-            "main:app",
-            host="0.0.0.0",
-            port=8000,
-            log_level="info",
-            timeout_keep_alive=1,       # сократим время ожидания клиентских keep-alive
-            shutdown_timeout=1          # минимальное время graceful shutdown
-        )
+        server.run()
     except KeyboardInterrupt:
-        # при Ctrl+C тут окажемся сразу
-        logger.info("Keyboard interrupt received, exiting...")
-        # станем уверены, что поток закрыт
+        logger.info("Keyboard interrupt received, shutting down immediately.")
         reader.stop()
         sys.exit(0)
