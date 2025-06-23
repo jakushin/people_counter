@@ -3,10 +3,10 @@
 # Парсинг аргументов командной строки
 while [[ "$#" -gt 0 ]]; do
     case $1 in
-        --user) user="$2"; shift ;;
+        --user)    user="$2"; shift ;;
         --password) password="$2"; shift ;;
-        --host) host="$2"; shift ;;
-        --port) port="$2"; shift ;;
+        --host)    host="$2"; shift ;;
+        --port)    port="$2"; shift ;;
         --profile) profile="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; exit 1 ;;
     esac
@@ -28,5 +28,5 @@ fi
 # Формирование RTSP URL
 export RTSP_URL="rtsp://${user}:${password}@${host}:${port}/axis-media/media.amp?streamprofile=${profile}"
 
-# Запуск приложения через Python, чтобы использовать встроенный uvicorn с force_exit
-exec python main.py
+# Запуск приложения через Python 3, чтобы использовать встроенный uvicorn с force_exit
+exec python3 main.py
