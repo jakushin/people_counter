@@ -15,7 +15,7 @@ from rtsp_reader import RTSPReader
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# Получаем RTSP_URL из окружения (формируется в start.sh)
+# Из окружения (start.sh)
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
@@ -23,19 +23,19 @@ if not RTSP_URL:
 
 TARGET_WIDTH = 960
 
-# Создаём FastAPI-приложение
+# FastAPI
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Загружаем модель и стартовые координаты линии
+# Модель и стартовая линия
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
 
-# Инициализируем и запускаем RTSPReader
+# RTSP-поток
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
 
-# --- Роуты API ---
+# --- HTTP маршруты ---
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -75,36 +75,29 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
-# При штатном завершении FastAPI останавливаем RTSPReader
+# На shutdown (обычный) останавливаем reader
 @app.on_event("shutdown")
 def shutdown_event():
     logger.info("Shutting down RTSP reader...")
     reader.stop()
 
-# --- Точка входа при запуске через python3 main.py ---
-
 if __name__ == "__main__":
     import uvicorn
 
-    # Перехват SIGINT/SIGTERM для генерации KeyboardInterrupt
-    def _signal_handler(sig, frame):
-        raise KeyboardInterrupt()
-    signal.signal(signal.SIGINT, _signal_handler)
-    signal.signal(signal.SIGTERM, _signal_handler)
+    # Сигнал Ctrl+C: остановим reader и мгновенно выйдем
+    def _exit_immediately(sig, frame):
+        logger.info("SIGINT received, stopping RTSP reader and exiting right now")
+        reader.stop()
+        os._exit(0)
 
-    config = uvicorn.Config(
+    signal.signal(signal.SIGINT, _exit_immediately)
+    signal.signal(signal.SIGTERM, _exit_immediately)
+
+    # Запускаем через uvicorn.run — без force_exit/shutdown_timeout
+    uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=8000,
         log_level="info",
-        timeout_keep_alive=1,  # уменьшаем ожидание keep-alive
-        force_exit=True,       # принудительный выход без ожидания соединений
+        timeout_keep_alive=1
     )
-    server = uvicorn.Server(config)
-
-    try:
-        server.run()
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received, shutting down immediately.")
-        reader.stop()
-        sys.exit(0)
