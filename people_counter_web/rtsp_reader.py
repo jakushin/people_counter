@@ -51,7 +51,7 @@ class RTSPReader:
                 time.sleep(0.1)
                 continue
 
-            # FPS 계산
+            # Расчёт FPS
             frame_count += 1
             now = time.time()
             if now - prev_time >= 1.0:
@@ -66,10 +66,8 @@ class RTSPReader:
             frame = cv2.resize(frame, (self.target_width, new_h))
             self.frame_width, self.frame_height = self.target_width, new_h
 
-            # Нарисовать линию и точки
+            # Нарисовать линию (точки через HTML)
             cv2.line(frame, self.line_start, self.line_end, (0,255,0), 2)
-            cv2.circle(frame, self.line_start, 8, (0,0,255), -1)
-            cv2.circle(frame, self.line_end, 8, (0,0,255), -1)
 
             self.frame = frame
 
