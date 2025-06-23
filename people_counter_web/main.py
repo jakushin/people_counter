@@ -1,6 +1,7 @@
-# main.py
 import logging
 import os
+import signal
+import sys
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -16,15 +17,18 @@ logger = logging.getLogger(__name__)
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
     logger.error("RTSP_URL не задан в окружении")
-    raise SystemExit(1)
+    sys.exit(1)
 
 TARGET_WIDTH = 960
 
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# Загрузка модели и конфигурации линии
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
+
+# Запуск RTSP-потока
 reader = RTSPReader(RTSP_URL, start, end, TARGET_WIDTH, model)
 reader.start()
 
@@ -41,7 +45,6 @@ def video_feed():
 
 @app.get("/get_line")
 async def get_line():
-    # всегда отдаем либо сохранённые, либо дефолт из файла
     return JSONResponse({
         "line_start": reader.line_start,
         "line_end":   reader.line_end
@@ -67,6 +70,18 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
+# Хук для корректной остановки RTSPReader
+@app.on_event("shutdown")
+def shutdown_event():
+    logger.info("Shutting down RTSP reader...")
+    reader.stop()
+
 if __name__ == "__main__":
     import uvicorn
+    # Обработаем SIGINT/SIGTERM так, чтобы uvicorn сразу шел в shutdown
+    def handle_exit(sig, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGINT, handle_exit)
+    signal.signal(signal.SIGTERM, handle_exit)
+
     uvicorn.run("main:app", host="0.0.0.0", port=8000)
