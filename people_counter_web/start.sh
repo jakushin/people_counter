@@ -1,4 +1,5 @@
 #!/bin/bash
+# start.sh
 
 # Парсинг аргументов
 while [[ "$#" -gt 0 ]]; do
@@ -24,9 +25,5 @@ fi
 
 export RTSP_URL="rtsp://${user}:${password}@${host}:${port}/axis-media/media.amp?streamprofile=${profile}"
 
-# Запускаем uvicorn через CLI, без access-логов и с коротким keep-alive
-exec uvicorn main:app \
-     --host 0.0.0.0 --port 8000 \
-     --log-level warning \
-     --access-log false \
-     --timeout-keep-alive 1
+# Запуск через Python 3, uvicorn внутри main.py
+exec python3 main.py

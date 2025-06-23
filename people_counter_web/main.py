@@ -1,6 +1,8 @@
+# main.py
 import logging
 import os
 import sys
+import signal
 
 from fastapi import FastAPI, Form
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
@@ -10,21 +12,23 @@ from ultralytics import YOLO
 from line_config import load_line_config, save_line_config
 from rtsp_reader import RTSPReader
 
-# Логирование только ошибок
+# Логирование только WARN и выше
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger(__name__)
 
-# RTSP URL из окружения
+# Получаем RTSP_URL из окружения (формируется в start.sh)
 RTSP_URL = os.getenv("RTSP_URL")
 if not RTSP_URL:
-    logging.error("RTSP_URL не задан в окружении")
+    logger.error("RTSP_URL не задан в окружении")
     sys.exit(1)
 
 TARGET_WIDTH = 960
 
+# FastAPI
 app = FastAPI()
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Модель и стартовая линия
+# Модель и стартовые координаты линии
 model = YOLO("yolov8n.pt")
 start, end = load_line_config()
 
@@ -70,7 +74,29 @@ async def get_status():
         "coords":            f"{reader.line_start} → {reader.line_end}"
     })
 
-# При нормальном shutdown FastAPI остановит reader
 @app.on_event("shutdown")
 def shutdown_event():
     reader.stop()
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Перехват SIGINT/SIGTERM, чтобы сразу прерывать run()
+    def _signal_handler(sig, frame):
+        raise KeyboardInterrupt()
+    signal.signal(signal.SIGINT, _signal_handler)
+    signal.signal(signal.SIGTERM, _signal_handler)
+
+    try:
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8000,
+            log_level="warning",
+            access_log=False,
+            timeout_keep_alive=1,
+        )
+    except KeyboardInterrupt:
+        # При Ctrl+C
+        reader.stop()
+        sys.exit(0)
