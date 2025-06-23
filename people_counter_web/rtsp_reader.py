@@ -1,3 +1,4 @@
+# rtsp_reader.py
 import cv2
 import threading
 import time
@@ -20,6 +21,7 @@ class RTSPReader:
 
         self.frame = None
         self.fps = 0.0
+        self.bitrate = 0.0   # в kbps
         self.frame_width = target_width
         self.frame_height = 0
         self.running = False
@@ -65,7 +67,6 @@ class RTSPReader:
             frame = cv2.resize(frame, (self.target_width, new_h))
             self.frame_width, self.frame_height = self.target_width, new_h
 
-            # Никаких линий/точек — это делается в браузере
             self.frame = frame
 
         cap.release()
@@ -76,12 +77,17 @@ class RTSPReader:
             if self.frame is None:
                 time.sleep(0.05)
                 continue
+
             ret, jpeg = cv2.imencode('.jpg', self.frame)
             if not ret:
                 continue
+
+            data = jpeg.tobytes()
+            # приблизительный bitrate = средний размер кадра * fps * 8 / 1000 (в kbps)
+            self.bitrate = len(data) * self.fps * 8 / 1000
             yield (
                 b'--frame\r\n'
                 b'Content-Type: image/jpeg\r\n\r\n' +
-                jpeg.tobytes() +
+                data +
                 b'\r\n'
             )

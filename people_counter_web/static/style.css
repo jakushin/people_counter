@@ -1,3 +1,4 @@
+/* static/style.css */
 body, html {
     margin: 0;
     padding: 0;
@@ -20,13 +21,15 @@ body, html {
 .diag {
     position: absolute;
     top: 8px;
-    left: 8px;
+    right: 8px;
+    left: auto;
     background: rgba(0,0,0,0.6);
     color: #fff;
-    padding: 6px 10px;
-    font: 14px sans-serif;
+    padding: 8px 12px;
+    font: 13px sans-serif;
     border-radius: 4px;
     z-index: 20;
+    text-align: right;
 }
 
 .point {

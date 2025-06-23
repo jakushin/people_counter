@@ -1,3 +1,4 @@
+<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,9 +12,10 @@
     <svg id="overlay"></svg>
 
     <div class="diag" id="diag">
-        FPS: <span id="fps">0</span><br>
-        RES: <span id="res">0x0</span><br>
-        Line: <span id="line">—</span>
+        <div>FPS: <span id="fps">0</span></div>
+        <div>RES: <span id="res">0×0</span></div>
+        <div>BR:  <span id="br">0</span> kbps</div>
+        <div>COORD: <span id="coords">—</span></div>
     </div>
 
     <div id="point1" class="point"></div>
@@ -23,18 +25,23 @@
 <script>
     let currentLine = [[0,0],[0,0]];
     const container = document.getElementById("container");
-    const img = document.getElementById("video");
-    const overlay = document.getElementById("overlay");
-    const lineEl = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    const img       = document.getElementById("video");
+    const overlay   = document.getElementById("overlay");
+    const lineEl    = document.createElementNS("http://www.w3.org/2000/svg", "line");
     overlay.appendChild(lineEl);
+
     const pt1 = document.getElementById("point1");
     const pt2 = document.getElementById("point2");
+    const elFps  = document.getElementById("fps");
+    const elRes  = document.getElementById("res");
+    const elBr   = document.getElementById("br");
+    const elCoord= document.getElementById("coords");
 
     function resizeOverlay() {
         const crect = container.getBoundingClientRect();
-        overlay.setAttribute("width", crect.width);
+        overlay.setAttribute("width",  crect.width);
         overlay.setAttribute("height", crect.height);
-        overlay.style.width = crect.width + "px";
+        overlay.style.width  = crect.width  + "px";
         overlay.style.height = crect.height + "px";
         drawLine();
         positionPoints();
@@ -60,18 +67,14 @@
         pt2.style.top  = (p2[1]*scale - pt2.offsetHeight/2) + "px";
     }
 
-    async function updateLine() {
-        const { line_start, line_end } = await (await fetch("/get_line")).json();
-        currentLine = [line_start, line_end];
-        document.getElementById("line").innerText = `${line_start} → ${line_end}`;
+    async function updateDiagnostics() {
+        const data = await (await fetch("/get_status")).json();
+        elFps.innerText   = data.fps;
+        elRes.innerText   = data.resolution;
+        elBr.innerText    = data.bitrate;
+        elCoord.innerText = data.coords;
         drawLine();
         positionPoints();
-    }
-
-    async function updateStatus() {
-        const data = await (await fetch("/get_status")).json();
-        document.getElementById("fps").innerText = data.fps;
-        document.getElementById("res").innerText = data.frame_size;
     }
 
     function makeDraggable(el, idx) {
@@ -105,7 +108,7 @@
                 form.append("x2", currentLine[1][0]);
                 form.append("y2", currentLine[1][1]);
                 await fetch("/set_line", { method: "POST", body: form });
-                updateLine();
+                updateDiagnostics();
             }
         });
     }
@@ -116,10 +119,8 @@
 
     img.onload = () => {
         resizeOverlay();
-        updateLine();
-        updateStatus();
-        setInterval(updateLine, 1000);
-        setInterval(updateStatus, 1000);
+        updateDiagnostics();
+        setInterval(updateDiagnostics, 1000);
     };
 </script>
 </body>
