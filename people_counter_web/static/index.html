@@ -16,6 +16,7 @@
         Line: <span id="line">—</span>
     </div>
 
+    <!-- Только ДВЕ точки -->
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
 </div>
@@ -37,10 +38,12 @@
         const rect = img.getBoundingClientRect();
         const scale = rect.width / 960;
         const [p1, p2] = currentLine;
+
         pt1.style.left = `${rect.left + p1[0]*scale - pt1.offsetWidth/2}px`;
-        pt1.style.top  = `${rect.top +  p1[1]*scale - pt1.offsetHeight/2}px`;
+        pt1.style.top  = `${rect.top  + p1[1]*scale - pt1.offsetHeight/2}px`;
+
         pt2.style.left = `${rect.left + p2[0]*scale - pt2.offsetWidth/2}px`;
-        pt2.style.top  = `${rect.top +  p2[1]*scale - pt2.offsetHeight/2}px`;
+        pt2.style.top  = `${rect.top  + p2[1]*scale - pt2.offsetHeight/2}px`;
     }
 
     async function updateStatus() {
@@ -50,32 +53,29 @@
     }
 
     function makeDraggable(el, idx) {
-        let isDragging = false;
+        let dragging = false;
 
         el.addEventListener("mousedown", e => {
             e.preventDefault();
-            isDragging = true;
+            dragging = true;
             document.body.style.cursor = "grabbing";
         });
 
         window.addEventListener("mousemove", e => {
-            if (!isDragging) return;
+            if (!dragging) return;
             const rect = img.getBoundingClientRect();
             const scale = rect.width / 960;
-
             let x = (e.clientX - rect.left) / scale;
             let y = (e.clientY - rect.top) / scale;
-
             x = Math.max(0, Math.min(960, x));
             y = Math.max(0, y);
-
             currentLine[idx] = [Math.round(x), Math.round(y)];
             postLine();
         });
 
         window.addEventListener("mouseup", () => {
-            if (isDragging) {
-                isDragging = false;
+            if (dragging) {
+                dragging = false;
                 document.body.style.cursor = "";
                 updateLine();
             }
@@ -92,17 +92,13 @@
         positionPoints();
     }
 
-    // Инициализация
+    // инициализация
     makeDraggable(pt1, 0);
     makeDraggable(pt2, 1);
     window.addEventListener("resize", positionPoints);
-
-    // Периодическое обновление
+    img.onload = () => { updateLine(); updateStatus(); };
     setInterval(updateLine, 1000);
     setInterval(updateStatus, 1000);
-
-    // Первая инициализация после загрузки картинки
-    img.onload = updateLine;
 </script>
 </body>
 </html>
