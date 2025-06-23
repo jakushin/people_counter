@@ -55,3 +55,11 @@ svg#overlay line {
     stroke: lime;
     stroke-width: 2;
 }
+
+.handle {
+    position: absolute;
+    width: 12px; height:12px;
+    background: rgba(0,255,0,0.8);
+    border:2px solid #fff; border-radius:50%;
+    cursor: grab; z-index: 40; user-select:none;
+}
