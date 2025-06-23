@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Парсинг аргументов командной строки
+# Парсинг аргументов
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --user)     user="$2"; shift ;;
@@ -13,19 +13,20 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# Значения по умолчанию
 host=${host:-"172.25.109.148"}
 port=${port:-"554"}
 profile=${profile:-"stream1"}
 
-# Проверка обязательных параметров
 if [[ -z "$user" || -z "$password" ]]; then
     echo "Usage: $0 --user <username> --password <password> [--host <host>] [--port <port>] [--profile <profile>]"
     exit 1
 fi
 
-# Формируем RTSP_URL
 export RTSP_URL="rtsp://${user}:${password}@${host}:${port}/axis-media/media.amp?streamprofile=${profile}"
 
-# Запускаем приложение через Python 3
-exec python3 main.py
+# Запускаем uvicorn через CLI, без access-логов и с коротким keep-alive
+exec uvicorn main:app \
+     --host 0.0.0.0 --port 8000 \
+     --log-level warning \
+     --access-log false \
+     --timeout-keep-alive 1
