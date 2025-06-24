@@ -2,17 +2,22 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>People Counter</title>
+    <title>People Counter with Polygon ROI</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="video-container" id="container">
     <img id="video" src="/video" alt="Video stream" />
     <svg id="overlay">
-        <!-- линия -->
+        <!-- ваша линия -->
         <line id="line" />
         <!-- полигон ROI -->
-        <polygon id="roi-polygon" />
+        <polygon id="roi" fill="rgba(0,255,255,0.3)" stroke="cyan" stroke-width="2" />
+        <!-- хендлы полигона -->
+        <circle class="roi-handle" r="6" fill="lime" stroke="#fff" stroke-width="2" />
+        <circle class="roi-handle" r="6" fill="lime" stroke="#fff" stroke-width="2" />
+        <circle class="roi-handle" r="6" fill="lime" stroke="#fff" stroke-width="2" />
+        <circle class="roi-handle" r="6" fill="lime" stroke="#fff" stroke-width="2" />
     </svg>
 
     <div class="diag">
@@ -23,11 +28,9 @@
         COORD: <span id="coords">—</span>
     </div>
 
-    <!-- точки линии -->
+    <!-- ваша линия точки -->
     <div id="point1" class="point"></div>
     <div id="point2" class="point"></div>
-    <!-- ручки полигона -->
-    <div id="handles"></div>
 </div>
 
 <script>
@@ -35,161 +38,133 @@
     const img = document.getElementById("video");
     const overlay = document.getElementById("overlay");
     const lineEl = document.getElementById("line");
-    const polyEl = document.getElementById("roi-polygon");
+    const pts = [document.getElementById("point1"), document.getElementById("point2")];
+    const handles = Array.from(overlay.querySelectorAll(".roi-handle"));
+    const roi = document.getElementById("roi");
 
-    // Линия
-    const pts = [
-        document.getElementById("point1"),
-        document.getElementById("point2")
-    ];
     let currentLine = [[0,0],[0,0]];
     let dragLineIdx = null;
 
-    // ROI-полигон
+    // стартовый полигон (можете заменить на загрузку из /get_region)
     let poly = [[100,100],[200,100],[200,200],[100,200]];
-    const handleContainer = document.getElementById("handles");
-    let handleElems = [];
     let dragHandleIdx = null;
 
-    // Диагностика
-    const elFps = document.getElementById("fps");
-    const elDisp = document.getElementById("res_disp");
-    const elSR   = document.getElementById("res_stream");
-    const elBr   = document.getElementById("br");
-    const elCoord= document.getElementById("coords");
-
-    function scale() {
-        const cr = container.getBoundingClientRect();
-        return cr.width / 960;
+    function getScale() {
+        return container.getBoundingClientRect().width / 960;
     }
+
     function resizeOverlay() {
         const cr = container.getBoundingClientRect();
-        overlay.style.width  = cr.width + "px";
-        overlay.style.height = cr.height + "px";
-        drawLine(); positionPts();
-        drawPoly(); positionHandles();
+        overlay.setAttribute("width",  cr.width);
+        overlay.setAttribute("height", cr.height);
+        drawLine();
+        positionLinePoints();
+        drawPoly();
+        positionHandles();
     }
 
-    // Линия
     function drawLine() {
-        const s = scale();
+        const s = getScale();
         const [p1,p2] = currentLine;
         lineEl.setAttribute("x1", p1[0]*s);
         lineEl.setAttribute("y1", p1[1]*s);
         lineEl.setAttribute("x2", p2[0]*s);
         lineEl.setAttribute("y2", p2[1]*s);
+        lineEl.setAttribute("stroke", "lime");
+        lineEl.setAttribute("stroke-width", "2");
     }
-    function positionPts() {
-        const s = scale();
-        currentLine.forEach((p,i)=>{
-            pts[i].style.left = p[0]*s - 8 + "px";
-            pts[i].style.top  = p[1]*s - 8 + "px";
+
+    function positionLinePoints() {
+        const s = getScale(), cr = container.getBoundingClientRect();
+        currentLine.forEach((p,i) => {
+            pts[i].style.left = cr.left + p[0]*s - pts[i].offsetWidth/2 + "px";
+            pts[i].style.top  = cr.top  + p[1]*s - pts[i].offsetHeight/2 + "px";
         });
     }
 
-    // Полигоны
     function drawPoly() {
-        const s = scale();
-        polyEl.setAttribute("points",
-            poly.map(p => `${p[0]*s},${p[1]*s}`).join(" ")
-        );
+        const s = getScale();
+        roi.setAttribute("points", poly.map(p=>`${p[0]*s},${p[1]*s}`).join(" "));
     }
+
     function positionHandles() {
-        // удаляем старые
-        handleContainer.innerHTML = "";
-        handleElems = [];
-        // создаём новые
-        const s = scale();
-        poly.forEach((p,i)=>{
-            const el = document.createElement("div");
-            el.className = "handle";
-            document.body.appendChild(el);
-            el.style.left = p[0]*s - 6 + "px";
-            el.style.top  = p[1]*s - 6 + "px";
-            el.addEventListener("mousedown", e=>{
-                e.preventDefault();
-                dragHandleIdx = i;
-                document.body.style.cursor = "grabbing";
-            });
-            handleElems.push(el);
+        const s = getScale(), cr = container.getBoundingClientRect();
+        handles.forEach((h,i) => {
+            const [x,y] = poly[i];
+            h.setAttribute("cx", x*s);
+            h.setAttribute("cy", y*s);
         });
     }
 
-    // Обновление данных с сервера (линия + статус)
-    async function updateAll() {
-        // линия
-        let res = await fetch("/get_line");
-        let j = await res.json();
-        currentLine = [j.line_start, j.line_end];
-        elCoord.innerText = `${j.line_start} → ${j.line_end}`;
-        // статус
-        res = await fetch("/get_status");
-        j = await res.json();
-        elFps.innerText = j.fps;
-        elDisp.innerText = j.resolution_disp;
-        elSR.innerText  = j.resolution_stream;
-        elBr.innerText  = j.bitrate;
-        drawLine(); positionPts();
-    }
-
-    // Drag линия
-    pts.forEach((el, idx)=>{
-        el.addEventListener("mousedown", e=>{
+    // Drag line points
+    pts.forEach((el, idx) => {
+        el.addEventListener("mousedown", e => {
             e.preventDefault();
             dragLineIdx = idx;
             document.body.style.cursor = "grabbing";
         });
     });
-    window.addEventListener("mousemove", e=>{
-        if (dragLineIdx===null) return;
-        const s = scale();
-        const cr = container.getBoundingClientRect();
-        let x = (e.clientX - cr.left)/s;
-        let y = (e.clientY - cr.top)/s;
+    window.addEventListener("mousemove", e => {
+        if (dragLineIdx === null) return;
+        const cr = container.getBoundingClientRect(), s = getScale();
+        let x = (e.clientX - cr.left)/s, y = (e.clientY - cr.top)/s;
         x = Math.max(0, Math.min(960, x));
         y = Math.max(0, Math.min(cr.height/s, y));
-        currentLine[dragLineIdx] = [Math.round(x), Math.round(y)];
-        drawLine(); positionPts();
+        currentLine[dragLineIdx] = [x,y];
+        drawLine();
+        positionLinePoints();
     });
-    window.addEventListener("mouseup", async ()=>{
-        if (dragLineIdx!==null) {
-            document.body.style.cursor="";
+    window.addEventListener("mouseup", async () => {
+        if (dragLineIdx !== null) {
+            document.body.style.cursor = "";
+            const [p1,p2] = currentLine;
             const f = new FormData();
-            f.append("x1", currentLine[0][0]);
-            f.append("y1", currentLine[0][1]);
-            f.append("x2", currentLine[1][0]);
-            f.append("y2", currentLine[1][1]);
+            f.append("x1", p1[0]);
+            f.append("y1", p1[1]);
+            f.append("x2", p2[0]);
+            f.append("y2", p2[1]);
             await fetch("/set_line", { method:"POST", body:f });
             dragLineIdx = null;
-            updateAll();
         }
     });
 
-    // Drag полигон
-    window.addEventListener("mousemove", e=>{
-        if (dragHandleIdx===null) return;
-        const s = scale();
-        const cr = container.getBoundingClientRect();
-        let x = (e.clientX - cr.left)/s;
-        let y = (e.clientY - cr.top)/s;
+    // Drag polygon handles
+    handles.forEach((h, idx) => {
+        h.addEventListener("mousedown", e => {
+            e.preventDefault();
+            dragHandleIdx = idx;
+            document.body.style.cursor = "grabbing";
+        });
+    });
+    window.addEventListener("mousemove", e => {
+        if (dragHandleIdx === null) return;
+        const cr = container.getBoundingClientRect(), s = getScale();
+        let x = (e.clientX - cr.left)/s, y = (e.clientY - cr.top)/s;
         x = Math.max(0, Math.min(960, x));
         y = Math.max(0, Math.min(cr.height/s, y));
-        poly[dragHandleIdx] = [Math.round(x), Math.round(y)];
-        drawPoly(); positionHandles();
+        poly[dragHandleIdx] = [x,y];
+        drawPoly();
+        positionHandles();
     });
-    window.addEventListener("mouseup", async ()=>{
-        if (dragHandleIdx!==null) {
-            document.body.style.cursor="";
-            // можно тут save_region
+    window.addEventListener("mouseup", async () => {
+        if (dragHandleIdx !== null) {
+            document.body.style.cursor = "";
+            // при желании: POST сохранение полигона
             dragHandleIdx = null;
         }
     });
 
     window.addEventListener("resize", resizeOverlay);
-    img.onload = ()=>{
+    img.onload = () => {
         resizeOverlay();
-        updateAll();
-        setInterval(updateAll, 1000);
+        setInterval(async () => {
+            const s = await fetch("/get_status").then(r=>r.json());
+            document.getElementById("fps").innerText = s.fps;
+            document.getElementById("res_disp").innerText = s.resolution_disp;
+            document.getElementById("res_stream").innerText= s.resolution_stream;
+            document.getElementById("br").innerText = s.bitrate;
+            document.getElementById("coords").innerText = s.coords;
+        }, 1000);
     };
 </script>
 </body>
