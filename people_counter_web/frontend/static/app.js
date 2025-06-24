@@ -123,13 +123,15 @@ function sendRoi() {
 
 function drawRoiMask(ctx, img, scale, x, y) {
   if (!roiPoints || roiPoints.length < 3) return;
-  // Затемняем только вне ROI, внутри ROI — оригинал
+  // Затемняем только вне ROI, внутри ROI — оригинал, затемнение только по области изображения
   ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, img.width * scale, img.height * scale);
   ctx.globalAlpha = 1.0;
-  // Слегка затемняем всё
   ctx.fillStyle = 'rgba(0,0,0,0.18)';
-  ctx.fillRect(x, y, img.width * scale, img.height * scale);
-  // Вырезаем ROI
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+  ctx.save();
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath();
   const [startX, startY] = [roiPoints[0][0] * scale + x, roiPoints[0][1] * scale + y];
@@ -139,6 +141,7 @@ function drawRoiMask(ctx, img, scale, x, y) {
   }
   ctx.closePath();
   ctx.fill();
+  ctx.restore();
   ctx.restore();
 }
 

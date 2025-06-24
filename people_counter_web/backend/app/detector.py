@@ -7,17 +7,26 @@ import contextlib
 import os
 
 @contextlib.contextmanager
-def suppress_stdout_stderr():
+def suppress_all_output():
+    # Подавляет stdout/stderr для Python и C/C++ (fd 1 и 2)
     with open(os.devnull, 'w') as devnull:
         old_stdout = sys.stdout
         old_stderr = sys.stderr
+        old_fd1 = os.dup(1)
+        old_fd2 = os.dup(2)
         sys.stdout = devnull
         sys.stderr = devnull
+        os.dup2(devnull.fileno(), 1)
+        os.dup2(devnull.fileno(), 2)
         try:
             yield
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+            os.dup2(old_fd1, 1)
+            os.dup2(old_fd2, 2)
+            os.close(old_fd1)
+            os.close(old_fd2)
 
 # Подавить OpenCV/ffmpeg логи
 os.environ['OPENCV_LOG_LEVEL'] = 'SILENT'
@@ -27,7 +36,7 @@ cv2.setLogLevel(0)
 class PersonDetector:
     def __init__(self):
         try:
-            with suppress_stdout_stderr():
+            with suppress_all_output():
                 self.model = YOLO('yolov8n.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
@@ -43,7 +52,7 @@ class PersonDetector:
                 frame_roi = cv2.bitwise_and(frame, frame, mask=mask)
             else:
                 frame_roi = frame
-            with suppress_stdout_stderr():
+            with suppress_all_output():
                 results = self.model(frame_roi, classes=[0])
             annotated = results[0].plot(line_width=1, labels=False, conf=False)
             # Нарисовать ROI поверх annotated
