@@ -5,6 +5,7 @@ from app.video_stream import VideoStream
 from app.detector import PersonDetector
 import cv2
 import asyncio
+import json
 
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
@@ -25,9 +26,17 @@ async def websocket_endpoint(
     try:
         stream = VideoStream(rtsp_url)
         detector = PersonDetector()
-        async for frame in stream.async_frames():
+        async for frame, stats in stream.async_frames():
             try:
                 result = detector.detect(frame)
+                # Отправляем статистику как JSON
+                await websocket.send_text(json.dumps({
+                    'timestamp': stats['timestamp'],
+                    'fps': stats['fps'],
+                    'shape': stats['shape'],
+                    'bitrate': None  # Можно добавить bitrate позже
+                }))
+                # Отправляем кадр как бинарные данные
                 await websocket.send_bytes(result)
             except Exception as e:
                 logging.error(f'Detection error: {e}')
