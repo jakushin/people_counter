@@ -1,6 +1,6 @@
 # main.py
 import logging, os, sys, signal
-from fastapi import FastAPI, Form, HTTPException
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
@@ -8,7 +8,7 @@ import json
 
 from line_config import load_line_config, save_line_config
 from rtsp_reader import RTSPReader
-from region_config import load_region_config, save_region_config  # Добавлен импорт
+from region_config import load_region_config, save_region_config
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,19 +48,33 @@ async def set_line(x1: int = Form(...), y1: int = Form(...),
     save_line_config(reader.line_start, reader.line_end)
     return {"status": "ok"}
 
-# Новые эндпоинты для работы с полигонами
+# Region endpoints
 @app.get("/get_region")
 async def get_region():
     region = load_region_config()
     return JSONResponse({"region": region})
 
 @app.post("/set_region")
-async def set_region(data: dict):
-    region = data.get("region")
-    if not isinstance(region, list):
-        raise HTTPException(status_code=400, detail="Invalid region format")
-    save_region_config(region)
-    return {"status": "ok"}
+async def set_region(request: Request):
+    try:
+        data = await request.json()
+        region = data.get("region", [])
+
+        # Validate region format
+        if not isinstance(region, list):
+            raise ValueError("Region must be a list")
+
+        for point in region:
+            if not isinstance(point, list) or len(point) != 2:
+                raise ValueError("Each point must be [x, y]")
+            if not all(isinstance(coord, int) for coord in point):
+                raise ValueError("Coordinates must be integers")
+
+        save_region_config(region)
+        return {"status": "ok", "points": len(region)}
+    except Exception as e:
+        logger.error(f"Region save error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/get_status")
 async def get_status():

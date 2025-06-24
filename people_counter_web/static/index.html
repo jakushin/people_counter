@@ -57,12 +57,14 @@
     let draggingIdx = null;
     let draggingPolyPoint = null;
     let polygonMode = false;
+    let currentScale = 1;
 
     // Control buttons
     document.getElementById("btn-new-poly").addEventListener("click", () => {
         polygonMode = true;
         polygonPoints = [];
         updatePolygon();
+        alert("Polygon mode: ON. Click on image to add points");
     });
 
     document.getElementById("btn-reset-poly").addEventListener("click", async () => {
@@ -70,49 +72,60 @@
         polygonMode = false;
         updatePolygon();
         await savePolygon();
+        alert("Polygon reset");
     });
 
     function resizeOverlay(){
-        const cr = container.getBoundingClientRect(), scale = cr.width/960;
+        const cr = container.getBoundingClientRect();
+        currentScale = cr.width / 960;
+
         overlay.setAttribute("width", cr.width);
         overlay.setAttribute("height", cr.height);
-        overlay.style.width=cr.width+"px";
-        overlay.style.height=cr.height+"px";
-        drawLine(); positionPoints(); updatePolygon();
+        overlay.style.width = cr.width + "px";
+        overlay.style.height = cr.height + "px";
+
+        drawLine();
+        positionPoints();
+        updatePolygon();
     }
 
     function drawLine(){
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        const [p1,p2]=currentLine;
-        lineEl.setAttribute("x1", p1[0]*scale);
-        lineEl.setAttribute("y1", p1[1]*scale);
-        lineEl.setAttribute("x2", p2[0]*scale);
-        lineEl.setAttribute("y2", p2[1]*scale);
+        const [p1,p2] = currentLine;
+        lineEl.setAttribute("x1", p1[0] * currentScale);
+        lineEl.setAttribute("y1", p1[1] * currentScale);
+        lineEl.setAttribute("x2", p2[0] * currentScale);
+        lineEl.setAttribute("y2", p2[1] * currentScale);
     }
 
     function positionPoints(){
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        currentLine.forEach((p, i)=>{
-            pts[i].style.left = (p[0]*scale - 8) + "px";
-            pts[i].style.top  = (p[1]*scale - 8) + "px";
+        currentLine.forEach((p, i) => {
+            pts[i].style.left = (p[0] * currentScale - 8) + "px";
+            pts[i].style.top  = (p[1] * currentScale - 8) + "px";
         });
     }
 
     function updatePolygon() {
-        // Update polygon shape
-        const pointsStr = polygonPoints.map(p => `${p[0]},${p[1]}`).join(" ");
-        polyShape.setAttribute("points", pointsStr);
-
         // Clear existing points
         while (polyGroup.children.length > 1) {
             polyGroup.removeChild(polyGroup.lastChild);
         }
 
+        // Update polygon shape if we have points
+        if (polygonPoints.length > 0) {
+            const pointsStr = polygonPoints.map(p =>
+                `${p[0] * currentScale},${p[1] * currentScale}`
+            ).join(" ");
+            polyShape.setAttribute("points", pointsStr);
+            polyShape.style.display = "block";
+        } else {
+            polyShape.style.display = "none";
+        }
+
         // Add points
         polygonPoints.forEach((point, idx) => {
             const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-            circle.setAttribute("cx", point[0]);
-            circle.setAttribute("cy", point[1]);
+            circle.setAttribute("cx", point[0] * currentScale);
+            circle.setAttribute("cy", point[1] * currentScale);
             circle.setAttribute("r", "8");
             circle.setAttribute("fill", "blue");
             circle.setAttribute("stroke", "white");
@@ -126,40 +139,56 @@
     }
 
     async function updateDiagnostics(){
-        const {line_start, line_end} = await (await fetch("/get_line")).json();
-        currentLine=[line_start,line_end];
-        elCoord.innerText = `${line_start} → ${line_end}`;
-        const stat = await (await fetch("/get_status")).json();
-        elFps.innerText = stat.fps;
-        elDisp.innerText = stat.resolution_disp;
-        elSR.innerText  = stat.resolution_stream;
-        elBr.innerText  = stat.bitrate;
-        drawLine(); positionPoints();
+        try {
+            const {line_start, line_end} = await (await fetch("/get_line")).json();
+            currentLine = [line_start, line_end];
+            elCoord.innerText = `${line_start} → ${line_end}`;
+
+            const stat = await (await fetch("/get_status")).json();
+            elFps.innerText = stat.fps;
+            elDisp.innerText = stat.resolution_disp;
+            elSR.innerText  = stat.resolution_stream;
+            elBr.innerText  = stat.bitrate;
+
+            drawLine();
+            positionPoints();
+        } catch (e) {
+            console.error("Diagnostics update failed:", e);
+        }
     }
 
     async function loadPolygon() {
-        const response = await fetch("/get_region");
-        const data = await response.json();
-        if (data.region && data.region.length > 0) {
-            polygonPoints = data.region;
-            updatePolygon();
+        try {
+            const response = await fetch("/get_region");
+            const data = await response.json();
+            if (data.region && data.region.length > 0) {
+                polygonPoints = data.region;
+                updatePolygon();
+            }
+        } catch (e) {
+            console.error("Polygon load failed:", e);
         }
     }
 
     async function savePolygon() {
-        await fetch("/set_region", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ region: polygonPoints })
-        });
+        try {
+            await fetch("/set_region", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ region: polygonPoints })
+            });
+            console.log("Polygon saved:", polygonPoints);
+        } catch (e) {
+            console.error("Polygon save failed:", e);
+        }
     }
 
     // Line points dragging
-    pts.forEach((el, idx)=>{
-        el.addEventListener("mousedown", e=>{
+    pts.forEach((el, idx) => {
+        el.addEventListener("mousedown", e => {
             e.preventDefault();
             draggingIdx = idx;
-            document.body.style.cursor="grabbing";
+            document.body.style.cursor = "grabbing";
         });
     });
 
@@ -168,49 +197,60 @@
         if (e.target.classList.contains("poly-point")) {
             draggingPolyPoint = parseInt(e.target.getAttribute("data-index"));
             document.body.style.cursor = "grabbing";
-        } else if (polygonMode) {
-            // Add new point
-            const cr = container.getBoundingClientRect();
-            const scale = cr.width / 960;
+        } else if (polygonMode && e.target === overlay) {
+            // Add new point - only in polygon mode
             const rect = overlay.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
+            const x = (e.clientX - rect.left) / currentScale;
+            const y = (e.clientY - rect.top) / currentScale;
 
             polygonPoints.push([Math.round(x), Math.round(y)]);
             updatePolygon();
         }
     });
 
-    window.addEventListener("mousemove", e=>{
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-
+    window.addEventListener("mousemove", e => {
         if (draggingIdx !== null) {
-            let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
-            x=Math.max(0,Math.min(960,x));
-            y=Math.max(0,Math.min(cr.height/scale,y));
-            currentLine[draggingIdx]=[Math.round(x),Math.round(y)];
-            drawLine(); positionPoints();
+            const rect = container.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / currentScale;
+            const y = (e.clientY - rect.top) / currentScale;
+
+            currentLine[draggingIdx] = [
+                Math.max(0, Math.min(960, Math.round(x))),
+                Math.max(0, Math.min(rect.height / currentScale, Math.round(y)))
+            ];
+
+            drawLine();
+            positionPoints();
         }
 
         if (draggingPolyPoint !== null) {
             const rect = overlay.getBoundingClientRect();
-            const x = (e.clientX - rect.left) / scale;
-            const y = (e.clientY - rect.top) / scale;
+            const x = (e.clientX - rect.left) / currentScale;
+            const y = (e.clientY - rect.top) / currentScale;
 
             polygonPoints[draggingPolyPoint] = [Math.round(x), Math.round(y)];
             updatePolygon();
         }
     });
 
-    window.addEventListener("mouseup", async ()=>{
-        if (draggingIdx !== null){
-            document.body.style.cursor="";
-            const [p1,p2]=currentLine;
-            const f=new FormData();
-            f.append("x1",p1[0]);f.append("y1",p1[1]);
-            f.append("x2",p2[0]);f.append("y2",p2[1]);
-            await fetch("/set_line",{method:"POST",body:f});
-            await updateDiagnostics();
+    window.addEventListener("mouseup", async () => {
+        if (draggingIdx !== null) {
+            document.body.style.cursor = "";
+            const [p1, p2] = currentLine;
+
+            const formData = new FormData();
+            formData.append("x1", p1[0]);
+            formData.append("y1", p1[1]);
+            formData.append("x2", p2[0]);
+            formData.append("y2", p2[1]);
+
+            try {
+                await fetch("/set_line", { method: "POST", body: formData });
+                await updateDiagnostics();
+            } catch (e) {
+                console.error("Line save failed:", e);
+            }
+
             draggingIdx = null;
         }
 
@@ -222,11 +262,12 @@
     });
 
     window.addEventListener("resize", resizeOverlay);
-    img.onload = ()=>{
+
+    img.onload = () => {
         resizeOverlay();
         updateDiagnostics();
         loadPolygon();
-        setInterval(updateDiagnostics,1000);
+        setInterval(updateDiagnostics, 1000);
     };
 </script>
 </body>
