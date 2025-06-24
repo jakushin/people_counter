@@ -26,8 +26,6 @@ let roiPoints = null;
 let draggingVertex = null;
 let draggingMid = null;
 let roiScale = 1;
-let roiDragging = false;
-let dragType = null; // 'vertex' | 'mid' | null
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -67,18 +65,15 @@ function getDefaultRoiPoints(imgW, imgH) {
 
 function drawRoi() {
   if (!roiPoints || !lastImg) { roiSvg.innerHTML = ''; return; }
-  // Масштаб SVG под размер canvas
   const contRect = container.getBoundingClientRect();
   roiSvg.setAttribute('width', contRect.width);
   roiSvg.setAttribute('height', contRect.height);
   roiSvg.style.width = contRect.width + 'px';
   roiSvg.style.height = contRect.height + 'px';
-  // Масштаб точек ROI к canvas
   const scale = Math.min(contRect.width / lastImg.width, contRect.height / lastImg.height);
   roiScale = scale;
   const offsetX = (contRect.width - lastImg.width * scale) / 2;
   const offsetY = (contRect.height - lastImg.height * scale) / 2;
-  // Полигон
   const pointsStr = roiPoints.map(([x, y]) => `${x * scale + offsetX},${y * scale + offsetY}`).join(' ');
   const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
   polygon.setAttribute('points', pointsStr);
@@ -237,65 +232,25 @@ function getRoiMousePos(e) {
   return [x, y];
 }
 
-roiSvg.addEventListener('mousedown', e => {
-  // Определяем, на какой точке или середине был mousedown
-  const contRect = container.getBoundingClientRect();
-  const scale = roiScale;
-  const offsetX = (contRect.width - lastImg.width * scale) / 2;
-  const offsetY = (contRect.height - lastImg.height * scale) / 2;
-  const mx = e.clientX - contRect.left;
-  const my = e.clientY - contRect.top;
-  let found = false;
-  // Проверяем вершины
-  roiPoints.forEach(([x, y], i) => {
-    const cx = x * scale + offsetX;
-    const cy = y * scale + offsetY;
-    if (Math.hypot(mx - cx, my - cy) < 12) {
-      draggingVertex = i;
-      dragType = 'vertex';
-      found = true;
-    }
-  });
-  if (!found) {
-    // Проверяем средние точки
-    for (let i = 0; i < roiPoints.length; i++) {
-      const next = (i + 1) % roiPoints.length;
-      const mxp = (roiPoints[i][0] + roiPoints[next][0]) / 2 * scale + offsetX;
-      const myp = (roiPoints[i][1] + roiPoints[next][1]) / 2 * scale + offsetY;
-      if (Math.hypot(mx - mxp, my - myp) < 10) {
-        draggingMid = i + 1;
-        dragType = 'mid';
-        found = true;
-        break;
-      }
-    }
-  }
-  roiDragging = found;
-});
 window.addEventListener('mousemove', e => {
-  if (!roiDragging) return;
-  if (!lastImg) return;
-  const [x, y] = getRoiMousePos(e);
-  if (dragType === 'vertex' && draggingVertex !== null) {
+  if (draggingVertex !== null && lastImg) {
+    const [x, y] = getRoiMousePos(e);
     roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
     drawRoi();
     sendRoi();
   }
 });
 window.addEventListener('mouseup', e => {
-  if (dragType === 'vertex') draggingVertex = null;
-  if (dragType === 'mid' && draggingMid !== null) {
-    if (!lastImg) return;
+  if (draggingVertex !== null) draggingVertex = null;
+  if (draggingMid !== null && lastImg) {
     const [x, y] = getRoiMousePos(e);
     roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
     draggingMid = null;
     drawRoi();
     sendRoi();
   }
-  dragType = null;
-  roiDragging = false;
 });
-roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; dragType = null; roiDragging = false; });
+roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; });
 
 resetRoiBtn.onclick = () => {
   if (lastImg) {
