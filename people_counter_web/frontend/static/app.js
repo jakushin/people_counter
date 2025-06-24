@@ -3,6 +3,8 @@ const ctx = canvas.getContext('2d');
 const statusDiv = document.getElementById('status');
 const startBtn = document.getElementById('start-btn');
 const container = document.getElementById('container');
+const roiSvg = document.getElementById('roi-svg');
+const resetRoiBtn = document.getElementById('reset-roi-btn');
 
 let ws = null;
 let running = false;
@@ -15,10 +17,15 @@ let lastStats = {
   timestamp: null,
   fps: null,
   shape: null,
-  bitrate: null,
+  cpu: null,
+  mem: null,
   status: 'Нет соединения'
 };
 let bytesReceived = [];
+let roiPoints = null;
+let draggingVertex = null;
+let draggingMid = null;
+let roiScale = 1;
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -32,7 +39,7 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 80);
+  ctx.fillRect(w-180, 0, 180, 95);
   ctx.globalAlpha = 1.0;
   ctx.fillStyle = '#0f0';
   ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
@@ -40,25 +47,128 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, 22);
   ctx.fillText('FPS: ' + (stats.fps ?? '-'), w-10, 37);
   ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, 52);
-  ctx.fillText('Bitrate: ' + (stats.bitrate ?? '-'), w-10, 67);
+  ctx.fillText('CPU: ' + (stats.cpu !== null ? stats.cpu + '%' : '-'), w-10, 67);
+  ctx.fillText('MEM: ' + (stats.mem !== null ? stats.mem + '%' : '-'), w-10, 82);
   ctx.restore();
 }
 
+function getDefaultRoiPoints(imgW, imgH) {
+  // 50px отступ, но не менее 10% ширины/высоты
+  const pad = 50;
+  return [
+    [pad, pad],
+    [imgW - pad, pad],
+    [imgW - pad, imgH - pad],
+    [pad, imgH - pad]
+  ];
+}
+
+function drawRoi() {
+  if (!roiPoints || !lastImg) { roiSvg.innerHTML = ''; return; }
+  // Масштаб SVG под размер canvas
+  const contRect = container.getBoundingClientRect();
+  roiSvg.setAttribute('width', contRect.width);
+  roiSvg.setAttribute('height', contRect.height);
+  roiSvg.style.width = contRect.width + 'px';
+  roiSvg.style.height = contRect.height + 'px';
+  // Масштаб точек ROI к canvas
+  const scale = Math.min(contRect.width / lastImg.width, contRect.height / lastImg.height);
+  roiScale = scale;
+  const offsetX = (contRect.width - lastImg.width * scale) / 2;
+  const offsetY = (contRect.height - lastImg.height * scale) / 2;
+  // Полигон
+  const pointsStr = roiPoints.map(([x, y]) => `${x * scale + offsetX},${y * scale + offsetY}`).join(' ');
+  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  polygon.setAttribute('points', pointsStr);
+  polygon.setAttribute('class', 'roi-polygon');
+  roiSvg.innerHTML = '';
+  roiSvg.appendChild(polygon);
+  // Вершины
+  roiPoints.forEach(([x, y], i) => {
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', x * scale + offsetX);
+    circle.setAttribute('cy', y * scale + offsetY);
+    circle.setAttribute('r', 8);
+    circle.setAttribute('class', 'roi-vertex');
+    circle.addEventListener('mousedown', e => { draggingVertex = i; e.stopPropagation(); });
+    roiSvg.appendChild(circle);
+  });
+  // Средние точки
+  for (let i = 0; i < roiPoints.length; i++) {
+    const next = (i + 1) % roiPoints.length;
+    const mx = (roiPoints[i][0] + roiPoints[next][0]) / 2;
+    const my = (roiPoints[i][1] + roiPoints[next][1]) / 2;
+    const midCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    midCircle.setAttribute('cx', mx * scale + offsetX);
+    midCircle.setAttribute('cy', my * scale + offsetY);
+    midCircle.setAttribute('r', 6);
+    midCircle.setAttribute('class', 'roi-midpoint');
+    midCircle.addEventListener('mousedown', e => { draggingMid = i + 1; e.stopPropagation(); });
+    roiSvg.appendChild(midCircle);
+  }
+}
+
+function sendRoi() {
+  if (ws && ws.readyState === 1 && roiPoints) {
+    ws.send(JSON.stringify({ type: 'roi', points: roiPoints }));
+  }
+}
+
+roiSvg.addEventListener('mousemove', e => {
+  if (draggingVertex === null && draggingMid === null) return;
+  const contRect = container.getBoundingClientRect();
+  const scale = roiScale;
+  const offsetX = (contRect.width - lastImg.width * scale) / 2;
+  const offsetY = (contRect.height - lastImg.height * scale) / 2;
+  const x = (e.clientX - contRect.left - offsetX) / scale;
+  const y = (e.clientY - contRect.top - offsetY) / scale;
+  if (draggingVertex !== null) {
+    roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
+    drawRoi();
+    sendRoi();
+  } else if (draggingMid !== null) {
+    // Показывать превью новой точки не будем, просто добавим при mouseup
+  }
+});
+roiSvg.addEventListener('mouseup', e => {
+  if (draggingVertex !== null) draggingVertex = null;
+  if (draggingMid !== null) {
+    const contRect = container.getBoundingClientRect();
+    const scale = roiScale;
+    const offsetX = (contRect.width - lastImg.width * scale) / 2;
+    const offsetY = (contRect.height - lastImg.height * scale) / 2;
+    const x = (e.clientX - contRect.left - offsetX) / scale;
+    const y = (e.clientY - contRect.top - offsetY) / scale;
+    roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
+    draggingMid = null;
+    drawRoi();
+    sendRoi();
+  }
+});
+roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; });
+window.addEventListener('mouseup', () => { draggingVertex = null; draggingMid = null; });
+
+resetRoiBtn.onclick = () => {
+  if (lastImg) {
+    roiPoints = getDefaultRoiPoints(lastImg.width, lastImg.height);
+    drawRoi();
+    sendRoi();
+  }
+};
+
 function fitAndDrawImage(img) {
-  // canvas всегда равен размеру контейнера
   const contRect = container.getBoundingClientRect();
   canvas.width = contRect.width;
   canvas.height = contRect.height;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // вычисляем масштаб fit to window
   const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
   const imgW = img.width * scale;
   const imgH = img.height * scale;
-  // центрируем
   const x = (canvas.width - imgW) / 2;
   const y = (canvas.height - imgH) / 2;
   ctx.drawImage(img, x, y, imgW, imgH);
   drawOverlay(ctx, lastStats, canvas.width, canvas.height);
+  drawRoi();
 }
 
 function updateFit() {
@@ -79,7 +189,11 @@ function connectWS() {
   ws.onopen = () => {
     setStatus('Поток запущен');
     lastStats.status = 'Поток запущен';
-    bytesReceived = [];
+    if (lastImg) {
+      roiPoints = getDefaultRoiPoints(lastImg.width, lastImg.height);
+      drawRoi();
+      sendRoi();
+    }
   };
   ws.onerror = e => {
     setStatus('Ошибка WebSocket', true);
@@ -92,28 +206,24 @@ function connectWS() {
   };
   ws.onmessage = (event) => {
     if (typeof event.data === 'string') {
-      // статистика
       try {
         const stats = JSON.parse(event.data);
         lastStats = {...lastStats, ...stats};
         lastStats.status = 'Поток запущен';
-        // bitrate вычисляется по bytesReceived
-        const now = Date.now();
-        bytesReceived = bytesReceived.filter(b => now - b.t < 2000); // 2 сек
-        const total = bytesReceived.reduce((s, b) => s + b.n, 0);
-        lastStats.bitrate = (total * 8 / 2 / 1000).toFixed(1) + ' kbps';
         if (lastImg) updateFit();
       } catch(e) {}
       return;
     }
-    // бинарные данные (jpeg)
     const blob = new Blob([event.data], {type: 'image/jpeg'});
-    bytesReceived.push({n: blob.size, t: Date.now()});
     const img = new window.Image();
     img.onload = function() {
       lastImg = img;
       lastImgW = img.width;
       lastImgH = img.height;
+      if (!roiPoints) {
+        roiPoints = getDefaultRoiPoints(img.width, img.height);
+        sendRoi();
+      }
       updateFit();
     };
     img.onerror = function() {

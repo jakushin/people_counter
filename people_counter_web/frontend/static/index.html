@@ -8,11 +8,13 @@
 <body>
   <div id="container">
     <canvas id="video-canvas"></canvas>
+    <svg id="roi-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></svg>
     <div id="controls">
       <label>Пользователь: <input id="user" type="text" value="view"></label>
       <label>Пароль: <input id="password" type="password" value="123qweASD"></label>
       <label>Host: <input id="host" type="text" value="172.25.109.148"></label>
       <button id="start-btn">Старт</button>
+      <button id="reset-roi-btn">Сбросить ROI</button>
     </div>
     <div id="status"></div>
   </div>

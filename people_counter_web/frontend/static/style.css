@@ -3,4 +3,26 @@ body { background: #181818; color: #eee; font-family: sans-serif; }
 #video-canvas { display: block; width: 100%; height: auto; background: #222; border: 1px solid #444; }
 #controls { margin: 10px 0; }
 #controls label { margin-right: 10px; }
-#status { margin-top: 10px; font-weight: bold; } 
+#status { margin-top: 10px; font-weight: bold; }
+
+/* ROI Polygon styles (Axis-like) */
+#roi-svg { z-index: 10; pointer-events: none; }
+.roi-polygon {
+  fill: rgba(0, 255, 255, 0.18); /* Axis: полупрозрачный голубой */
+  stroke: #00bfff; /* Axis: ярко-голубой */
+  stroke-width: 2.5;
+}
+.roi-vertex {
+  fill: #fff;
+  stroke: #00bfff;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 2px #00bfff);
+  cursor: pointer;
+  pointer-events: all;
+}
+.roi-midpoint {
+  fill: #00bfff;
+  opacity: 0.5;
+  cursor: pointer;
+  pointer-events: all;
+} 

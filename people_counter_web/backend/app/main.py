@@ -6,6 +6,7 @@ from app.detector import PersonDetector
 import cv2
 import asyncio
 import json
+import psutil
 
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
@@ -23,20 +24,36 @@ async def websocket_endpoint(
 ):
     await websocket.accept()
     rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
+    roi = None
     try:
         stream = VideoStream(rtsp_url)
         detector = PersonDetector()
         async for frame, stats in stream.async_frames():
             try:
-                result = detector.detect(frame)
-                # Отправляем статистику как JSON
+                # Получаем ROI от клиента (если есть)
+                while websocket.client_state.value == 1:
+                    try:
+                        msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
+                        data = json.loads(msg)
+                        if data.get('type') == 'roi':
+                            roi = data.get('points')
+                    except asyncio.TimeoutError:
+                        break
+                    except Exception:
+                        break
+                # Передаём ROI в детектор
+                result = detector.detect(frame, roi=roi)
+                # Статистика CPU/mem
+                cpu = psutil.cpu_percent()
+                mem = psutil.virtual_memory().percent
                 await websocket.send_text(json.dumps({
                     'timestamp': stats['timestamp'],
                     'fps': stats['fps'],
                     'shape': stats['shape'],
-                    'bitrate': None  # Можно добавить bitrate позже
+                    'cpu': cpu,
+                    'mem': mem,
+                    'status': 'ok'
                 }))
-                # Отправляем кадр как бинарные данные
                 await websocket.send_bytes(result)
             except Exception as e:
                 logging.error(f'Detection error: {e}')
