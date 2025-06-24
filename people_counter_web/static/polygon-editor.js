@@ -9,6 +9,17 @@ let points = [
 let draggingPoint = null;
 let draggingMid = null;
 
+function updateCoordsDiag() {
+  const elCoord = document.getElementById('coords');
+  if (points.length === 2) {
+    elCoord.innerText = `${points[0].map(x=>Math.round(x))} → ${points[1].map(x=>Math.round(x))}`;
+  } else if (points.length > 2) {
+    elCoord.innerText = points.map(p=>`(${Math.round(p[0])},${Math.round(p[1])})`).join(' ');
+  } else {
+    elCoord.innerText = '—';
+  }
+}
+
 function resizeSVG() {
   const cr = img.getBoundingClientRect();
   svg.setAttribute('width', cr.width);
@@ -85,6 +96,7 @@ function drawPolygon() {
       svg.appendChild(midCircle);
     }
   }
+  updateCoordsDiag();
 }
 
 drawPolygon();
@@ -122,4 +134,23 @@ svg.addEventListener('mouseleave', () => {
 
 window.addEventListener('resize', resizeSVG);
 img.onload = resizeSVG;
-if (img.complete) resizeSVG(); 
+if (img.complete) resizeSVG();
+
+// --- Кнопки управления ---
+const btnClose = document.getElementById('btn-close-poly');
+const btnClear = document.getElementById('btn-clear-poly');
+const btnReset = document.getElementById('btn-reset-poly');
+if (btnClose) btnClose.onclick = () => {
+  if (points.length > 2 && (points[0][0] !== points[points.length-1][0] || points[0][1] !== points[points.length-1][1])) {
+    points.push([...points[0]]);
+    drawPolygon();
+  }
+};
+if (btnClear) btnClear.onclick = () => {
+  points = [];
+  drawPolygon();
+};
+if (btnReset) btnReset.onclick = () => {
+  points = [ [200,200], [400,200] ];
+  drawPolygon();
+}; 

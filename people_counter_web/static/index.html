@@ -17,7 +17,32 @@
         <div>BR: <span id="br">0</span> kbps</div>
         <div>COORD: <span id="coords">—</span></div>
     </div>
+    <div id="poly-controls" style="position:absolute;left:8px;top:8px;z-index:30;">
+      <button id="btn-close-poly">Замкнуть полигон</button>
+      <button id="btn-clear-poly">Очистить</button>
+      <button id="btn-reset-poly">Сбросить</button>
+    </div>
 </div>
+<script>
+const elFps = document.getElementById("fps");
+const elDisp = document.getElementById("res_disp");
+const elSR   = document.getElementById("res_stream");
+const elBr   = document.getElementById("br");
+const elCoord= document.getElementById("coords");
+async function updateDiagnostics(){
+    try {
+        const {line_start, line_end} = await (await fetch("/get_line")).json();
+        elCoord.innerText = `${line_start} → ${line_end}`;
+        const stat = await (await fetch("/get_status")).json();
+        elFps.innerText = stat.fps;
+        elDisp.innerText = stat.resolution_disp;
+        elSR.innerText  = stat.resolution_stream;
+        elBr.innerText  = stat.bitrate;
+    } catch(e) {}
+}
+setInterval(updateDiagnostics, 1000);
+window.addEventListener('DOMContentLoaded', updateDiagnostics);
+</script>
 <script src="/static/polygon-editor.js"></script>
 </body>
 </html>
