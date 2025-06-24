@@ -14,3 +14,23 @@
 }
 svg#overlay { position: absolute; top:0; left:0; z-index:25; pointer-events: none; }
 svg#overlay line { stroke: lime; stroke-width:2; }
+
+/* --- polygon editor styles --- */
+.vertex {
+  fill: #fff;
+  stroke: #007bff;
+  stroke-width: 2;
+  cursor: pointer;
+  pointer-events: all;
+}
+.midpoint {
+  fill: #007bff;
+  opacity: 0.5;
+  cursor: pointer;
+  pointer-events: all;
+}
+.polygon-area {
+  fill: rgba(0,123,255,0.2);
+  stroke: #007bff;
+  stroke-width: 2;
+}
