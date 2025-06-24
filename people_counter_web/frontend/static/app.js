@@ -155,7 +155,6 @@ function fitAndDrawImage(img) {
   const x = (canvas.width - imgW) / 2;
   const y = (canvas.height - imgH) / 2;
   ctx.drawImage(img, x, y, imgW, imgH);
-  drawRoiMask(ctx, img, scale, x, y);
   drawOverlay(ctx, lastStats, canvas.width, canvas.height);
   drawRoi();
 }
