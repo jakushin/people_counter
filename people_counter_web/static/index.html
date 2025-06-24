@@ -1,15 +1,16 @@
-<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>People Counter</title>
+    <title>People Counter with Polygon ROI</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
 <div class="video-container" id="container">
-    <img id="video" src="/video" />
-    <svg id="overlay"></svg>
+    <img id="video" src="/video" alt="Video stream" />
+    <svg id="overlay">
+        <polygon id="roi-polygon" points="" />
+    </svg>
 
     <div class="diag" id="diag">
         <div>FPS: <span id="fps">0</span></div>
@@ -17,155 +18,148 @@
         <div>SR: <span id="res_stream">0×0</span></div>
         <div>BR: <span id="br">0</span> kbps</div>
         <div>COORD: <span id="coords">—</span></div>
-        <div>REGION: <span id="region">—</span></div>
     </div>
 
-    <div id="point1" class="point"></div>
-    <div id="point2" class="point"></div>
-    <div id="h1" class="handle"></div>
-    <div id="h2" class="handle"></div>
-    <div id="h3" class="handle"></div>
-    <div id="h4" class="handle"></div>
+    <!-- draggable vertices -->
+    <div id="vertices"></div>
+    <!-- draggable midpoints -->
+    <div id="midpoints"></div>
 </div>
 
 <script>
     const container = document.getElementById("container");
     const img = document.getElementById("video");
     const overlay = document.getElementById("overlay");
+    const polygon = document.getElementById("roi-polygon");
+    const diag = {
+        fps: document.getElementById("fps"),
+        disp: document.getElementById("res_disp"),
+        sr: document.getElementById("res_stream"),
+        br: document.getElementById("br"),
+        coords: document.getElementById("coords")
+    };
 
-    const lineEl = document.createElementNS("http://www.w3.org/2000/svg","line");
-    const rectEl = document.createElementNS("http://www.w3.org/2000/svg","rect");
-    overlay.appendChild(rectEl);
-    overlay.appendChild(lineEl);
+    // Initial polygon (normalized coords in [0,960]x[0,frame_h])
+    let poly = [[100,100],[200,100],[200,200],[100,200]];
 
-    const pts     = [document.getElementById("point1"), document.getElementById("point2")];
-    const handles = ["h1","h2","h3","h4"].map(id=>document.getElementById(id));
-    const elFps   = document.getElementById("fps");
-    const elDisp  = document.getElementById("res_disp");
-    const elSR    = document.getElementById("res_stream");
-    const elBr    = document.getElementById("br");
-    const elCoord = document.getElementById("coords");
-    const elReg   = document.getElementById("region");
+    let vertexElems = [];
+    let midElems = [];
 
-    let currentLine = [[0,0],[0,0]];
-    let dragLineIdx = null;
+    let dragVertexIdx = null;
+    let dragMidIdx = null;
 
-    let region = [100,100,200,200];
-    let dragHandleIdx = null;
+    function scaleToScreen(pt) {
+        const cr = container.getBoundingClientRect();
+        const scale = cr.width / 960;
+        return [cr.left + pt[0]*scale, cr.top + pt[1]*scale];
+    }
+
+    function screenToScale(x, y) {
+        const cr = container.getBoundingClientRect();
+        const scale = cr.width / 960;
+        const nx = (x - cr.left)/scale;
+        const ny = (y - cr.top)/scale;
+        return [Math.max(0, Math.min(960,nx)), Math.max(0,ny)];
+    }
+
+    function drawPolygon() {
+        polygon.setAttribute("points", poly.map(p=>p.join(",")).join(" "));
+    }
+
+    function renderVertices() {
+        const vcont = document.getElementById("vertices");
+        vcont.innerHTML = "";
+        vertexElems = [];
+        poly.forEach((pt,i)=>{
+            const el = document.createElement("div");
+            el.className = "point";
+            document.body.appendChild(el);
+            const [sx,sy] = scaleToScreen(pt);
+            el.style.left = sx - el.offsetWidth/2 + "px";
+            el.style.top  = sy - el.offsetHeight/2 + "px";
+            el.addEventListener("mousedown", e=>{
+                e.preventDefault();
+                dragVertexIdx = i;
+                document.body.style.cursor = "grabbing";
+            });
+            vertexElems.push(el);
+        });
+    }
+
+    function renderMidpoints() {
+        const mcont = document.getElementById("midpoints");
+        mcont.innerHTML = "";
+        midElems = [];
+        poly.forEach((pt,i)=>{
+            const next = poly[(i+1)%poly.length];
+            const mid = [(pt[0]+next[0])/2, (pt[1]+next[1])/2];
+            const el = document.createElement("div");
+            el.className = "midpoint";
+            document.body.appendChild(el);
+            const [sx,sy] = scaleToScreen(mid);
+            el.style.left = sx - el.offsetWidth/2 + "px";
+            el.style.top  = sy - el.offsetHeight/2 + "px";
+            el.addEventListener("mousedown", e=>{
+                e.preventDefault();
+                dragMidIdx = i;
+                document.body.style.cursor = "pointer";
+            });
+            midElems.push(el);
+        });
+    }
+
+    window.addEventListener("mousemove", e=>{
+        if (dragVertexIdx!==null) {
+            const [nx,ny] = screenToScale(e.clientX, e.clientY);
+            poly[dragVertexIdx] = [Math.round(nx), Math.round(ny)];
+            drawPolygon();
+            renderVertices();
+            renderMidpoints();
+        } else if (dragMidIdx!==null) {
+            // insert new vertex at dragMidIdx+1
+            const [nx,ny] = screenToScale(e.clientX, e.clientY);
+            poly.splice(dragMidIdx+1, 0, [Math.round(nx), Math.round(ny)]);
+            drawPolygon();
+            renderVertices();
+            renderMidpoints();
+            // start dragging the new vertex
+            dragVertexIdx = dragMidIdx+1;
+            dragMidIdx = null;
+        }
+    });
+
+    window.addEventListener("mouseup", e=>{
+        if (dragVertexIdx!==null || dragMidIdx!==null) {
+            document.body.style.cursor = "";
+            dragVertexIdx = null;
+            dragMidIdx = null;
+            // here you could POST poly to /set_region
+        }
+    });
 
     function resizeOverlay() {
-        const cr = container.getBoundingClientRect(), scale=cr.width/960;
-        overlay.setAttribute("width", cr.width);
-        overlay.setAttribute("height",cr.height);
-        overlay.style.width=cr.width+"px"; overlay.style.height=cr.height+"px";
-        drawLine(); positionPts();
-        drawRect(); positionHandles();
-    }
-    function drawLine(){
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        const [p1,p2]=currentLine;
-        lineEl.setAttribute("x1",p1[0]*scale);
-        lineEl.setAttribute("y1",p1[1]*scale);
-        lineEl.setAttribute("x2",p2[0]*scale);
-        lineEl.setAttribute("y2",p2[1]*scale);
-    }
-    function positionPts(){
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        currentLine.forEach((p,i)=>{
-            pts[i].style.left=(p[0]*scale-8)+"px";
-            pts[i].style.top =(p[1]*scale-8)+"px";
-        });
-    }
-    function drawRect(){
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        const [x1,y1,x2,y2]=region;
-        rectEl.setAttribute("x",x1*scale);
-        rectEl.setAttribute("y",y1*scale);
-        rectEl.setAttribute("width",(x2-x1)*scale);
-        rectEl.setAttribute("height",(y2-y1)*scale);
-        elReg.innerText=`[${x1},${y1},${x2},${y2}]`;
-    }
-    function positionHandles(){
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        handles.forEach((h,i)=>{
-            const cx=(i%2?region[2]:region[0])*scale;
-            const cy=(i>1?region[3]:region[1])*scale;
-            h.style.left=(cr.left+cx-h.offsetWidth/2)+"px";
-            h.style.top =(cr.top +cy-h.offsetHeight/2)+"px";
-        });
+        const cr = container.getBoundingClientRect();
+        overlay.style.width  = cr.width  + "px";
+        overlay.style.height = cr.height + "px";
+        drawPolygon();
+        renderVertices();
+        renderMidpoints();
     }
 
-    async function updateAll(){
-        const {line_start,line_end}=await (await fetch("/get_line")).json();
-        currentLine=[line_start,line_end];
-        elCoord.innerText=`${line_start} → ${line_end}`;
-        const stat=await (await fetch("/get_status")).json();
-        elFps.innerText=stat.fps; elDisp.innerText=stat.resolution_disp;
-        elSR.innerText=stat.resolution_stream; elBr.innerText=stat.bitrate;
-        const {region: r}=await (await fetch("/get_region")).json();
-        region = r||region;
-        drawLine(); positionPts(); drawRect(); positionHandles();
-    }
-
-    // Line drag
-    pts.forEach((el,idx)=>{
-        el.addEventListener("mousedown",e=>{
-            e.preventDefault(); dragLineIdx=idx; document.body.style.cursor="grabbing";
-        });
-    });
-    window.addEventListener("mousemove",e=>{
-        if(dragLineIdx===null) return;
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
-        x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(cr.height/scale,y));
-        currentLine[dragLineIdx]=[Math.round(x),Math.round(y)];
-        drawLine(); positionPts();
-    });
-    window.addEventListener("mouseup",async()=>{
-        if(dragLineIdx!==null){
-            document.body.style.cursor="";
-            const [p1,p2]=currentLine;
-            const f=new FormData();
-            f.append("x1",p1[0]);f.append("y1",p1[1]);
-            f.append("x2",p2[0]);f.append("y2",p2[1]);
-            await fetch("/set_line",{method:"POST",body:f});
-            dragLineIdx=null;
-        }
-    });
-
-    // ROI drag
-    handles.forEach((h,i)=>{
-        h.addEventListener("mousedown",e=>{
-            e.preventDefault(); dragHandleIdx=i; document.body.style.cursor="grabbing";
-        });
-    });
-    window.addEventListener("mousemove",e=>{
-        if(dragHandleIdx===null) return;
-        const cr=container.getBoundingClientRect(),scale=cr.width/960;
-        let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
-        x=Math.max(0,Math.min(960,x)); y=Math.max(0,Math.min(cr.height/scale,y));
-        if(dragHandleIdx%2) region[2]=Math.round(x); else region[0]=Math.round(x);
-        if(dragHandleIdx>1) region[3]=Math.round(y); else region[1]=Math.round(y);
-        drawRect(); positionHandles();
-    });
-    window.addEventListener("mouseup",async()=>{
-        if(dragHandleIdx!==null){
-            document.body.style.cursor="";
-            const [x1,y1,x2,y2]=region;
-            const f=new FormData();
-            f.append("x1",x1);f.append("y1",y1);
-            f.append("x2",x2);f.append("y2",y2);
-            await fetch("/set_region",{method:"POST",body:f});
-            dragHandleIdx=null;
-        }
-    });
-
-    window.addEventListener("resize",resizeOverlay);
-    img.onload=()=>{
+    img.onload = () => {
         resizeOverlay();
-        updateAll();
-        setInterval(updateAll,1000);
+        // diagnostics loop unchanged...
+        setInterval(async()=>{
+            const r = await (await fetch("/get_status")).json();
+            diag.fps.innerText = r.fps;
+            diag.disp.innerText = r.resolution_disp;
+            diag.sr.innerText   = r.resolution_stream;
+            diag.br.innerText   = r.bitrate;
+            diag.coords.innerText = r.coords;
+        }, 1000);
     };
+    window.addEventListener("resize", resizeOverlay);
+
 </script>
 </body>
 </html>
