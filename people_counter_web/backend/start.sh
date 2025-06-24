@@ -10,4 +10,4 @@ while [[ "$#" -gt 0 ]]; do
   esac
   shift
 done
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning 
