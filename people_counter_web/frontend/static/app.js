@@ -87,11 +87,13 @@ function drawRoi() {
     circle.setAttribute('cy', y * scale + offsetY);
     circle.setAttribute('r', 8);
     circle.setAttribute('class', 'roi-vertex');
+    circle.setAttribute('data-idx', i);
     circle.addEventListener('mousedown', e => { draggingVertex = i; e.stopPropagation(); });
     circle.addEventListener('dblclick', e => {
       e.stopPropagation();
-      if (roiPoints.length > 3) {
-        roiPoints.splice(i, 1);
+      const idx = parseInt(circle.getAttribute('data-idx'));
+      if (roiPoints.length > 3 && idx >= 0 && idx < roiPoints.length) {
+        roiPoints.splice(idx, 1);
         drawRoi();
         sendRoi();
       }
