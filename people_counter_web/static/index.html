@@ -19,8 +19,14 @@
         <div>COORD: <span id="coords">—</span></div>
     </div>
 
-    <div id="point1" class="point"></div>
-    <div id="point2" class="point"></div>
+    <div id="point1" class="point line-point"></div>
+    <div id="point2" class="point line-point"></div>
+
+    <!-- Control buttons -->
+    <div class="controls">
+        <button id="btn-new-poly">New Polygon</button>
+        <button id="btn-reset-poly">Reset Polygon</button>
+    </div>
 </div>
 
 <script>
@@ -37,8 +43,34 @@
     const elBr   = document.getElementById("br");
     const elCoord= document.getElementById("coords");
 
+    // Polygon elements
+    const polyGroup = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    overlay.appendChild(polyGroup);
+    const polyShape = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+    polyShape.setAttribute("fill", "rgba(0,255,0,0.3)");
+    polyShape.setAttribute("stroke", "green");
+    polyShape.setAttribute("stroke-width", "2");
+    polyGroup.appendChild(polyShape);
+
     let currentLine = [[0,0],[0,0]];
+    let polygonPoints = [];
     let draggingIdx = null;
+    let draggingPolyPoint = null;
+    let polygonMode = false;
+
+    // Control buttons
+    document.getElementById("btn-new-poly").addEventListener("click", () => {
+        polygonMode = true;
+        polygonPoints = [];
+        updatePolygon();
+    });
+
+    document.getElementById("btn-reset-poly").addEventListener("click", async () => {
+        polygonPoints = [];
+        polygonMode = false;
+        updatePolygon();
+        await savePolygon();
+    });
 
     function resizeOverlay(){
         const cr = container.getBoundingClientRect(), scale = cr.width/960;
@@ -46,7 +78,7 @@
         overlay.setAttribute("height", cr.height);
         overlay.style.width=cr.width+"px";
         overlay.style.height=cr.height+"px";
-        drawLine(); positionPoints();
+        drawLine(); positionPoints(); updatePolygon();
     }
 
     function drawLine(){
@@ -66,6 +98,33 @@
         });
     }
 
+    function updatePolygon() {
+        // Update polygon shape
+        const pointsStr = polygonPoints.map(p => `${p[0]},${p[1]}`).join(" ");
+        polyShape.setAttribute("points", pointsStr);
+
+        // Clear existing points
+        while (polyGroup.children.length > 1) {
+            polyGroup.removeChild(polyGroup.lastChild);
+        }
+
+        // Add points
+        polygonPoints.forEach((point, idx) => {
+            const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+            circle.setAttribute("cx", point[0]);
+            circle.setAttribute("cy", point[1]);
+            circle.setAttribute("r", "8");
+            circle.setAttribute("fill", "blue");
+            circle.setAttribute("stroke", "white");
+            circle.setAttribute("stroke-width", "2");
+            circle.setAttribute("class", "poly-point");
+            circle.setAttribute("data-index", idx);
+            circle.style.cursor = "pointer";
+            circle.style.pointerEvents = "all";
+            polyGroup.appendChild(circle);
+        });
+    }
+
     async function updateDiagnostics(){
         const {line_start, line_end} = await (await fetch("/get_line")).json();
         currentLine=[line_start,line_end];
@@ -78,6 +137,24 @@
         drawLine(); positionPoints();
     }
 
+    async function loadPolygon() {
+        const response = await fetch("/get_region");
+        const data = await response.json();
+        if (data.region && data.region.length > 0) {
+            polygonPoints = data.region;
+            updatePolygon();
+        }
+    }
+
+    async function savePolygon() {
+        await fetch("/set_region", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ region: polygonPoints })
+        });
+    }
+
+    // Line points dragging
     pts.forEach((el, idx)=>{
         el.addEventListener("mousedown", e=>{
             e.preventDefault();
@@ -86,18 +163,47 @@
         });
     });
 
+    // Polygon points dragging
+    overlay.addEventListener("mousedown", e => {
+        if (e.target.classList.contains("poly-point")) {
+            draggingPolyPoint = parseInt(e.target.getAttribute("data-index"));
+            document.body.style.cursor = "grabbing";
+        } else if (polygonMode) {
+            // Add new point
+            const cr = container.getBoundingClientRect();
+            const scale = cr.width / 960;
+            const rect = overlay.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
+
+            polygonPoints.push([Math.round(x), Math.round(y)]);
+            updatePolygon();
+        }
+    });
+
     window.addEventListener("mousemove", e=>{
-        if (draggingIdx===null) return;
-        const cr=container.getBoundingClientRect(), scale=cr.width/960;
-        let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
-        x=Math.max(0,Math.min(960,x));
-        y=Math.max(0,Math.min(cr.height/scale,y));
-        currentLine[draggingIdx]=[Math.round(x),Math.round(y)];
-        drawLine(); positionPoints();
+        const cr = container.getBoundingClientRect(), scale=cr.width/960;
+
+        if (draggingIdx !== null) {
+            let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
+            x=Math.max(0,Math.min(960,x));
+            y=Math.max(0,Math.min(cr.height/scale,y));
+            currentLine[draggingIdx]=[Math.round(x),Math.round(y)];
+            drawLine(); positionPoints();
+        }
+
+        if (draggingPolyPoint !== null) {
+            const rect = overlay.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / scale;
+            const y = (e.clientY - rect.top) / scale;
+
+            polygonPoints[draggingPolyPoint] = [Math.round(x), Math.round(y)];
+            updatePolygon();
+        }
     });
 
     window.addEventListener("mouseup", async ()=>{
-        if (draggingIdx!==null){
+        if (draggingIdx !== null){
             document.body.style.cursor="";
             const [p1,p2]=currentLine;
             const f=new FormData();
@@ -107,12 +213,19 @@
             await updateDiagnostics();
             draggingIdx = null;
         }
+
+        if (draggingPolyPoint !== null) {
+            document.body.style.cursor = "";
+            await savePolygon();
+            draggingPolyPoint = null;
+        }
     });
 
     window.addEventListener("resize", resizeOverlay);
     img.onload = ()=>{
         resizeOverlay();
         updateDiagnostics();
+        loadPolygon();
         setInterval(updateDiagnostics,1000);
     };
 </script>

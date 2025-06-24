@@ -1,12 +1,14 @@
 # main.py
 import logging, os, sys, signal
-from fastapi import FastAPI, Form
+from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
+import json
 
 from line_config import load_line_config, save_line_config
 from rtsp_reader import RTSPReader
+from region_config import load_region_config, save_region_config  # Добавлен импорт
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -44,6 +46,20 @@ async def set_line(x1: int = Form(...), y1: int = Form(...),
     reader.line_start = (x1, y1)
     reader.line_end   = (x2, y2)
     save_line_config(reader.line_start, reader.line_end)
+    return {"status": "ok"}
+
+# Новые эндпоинты для работы с полигонами
+@app.get("/get_region")
+async def get_region():
+    region = load_region_config()
+    return JSONResponse({"region": region})
+
+@app.post("/set_region")
+async def set_region(data: dict):
+    region = data.get("region")
+    if not isinstance(region, list):
+        raise HTTPException(status_code=400, detail="Invalid region format")
+    save_region_config(region)
     return {"status": "ok"}
 
 @app.get("/get_status")

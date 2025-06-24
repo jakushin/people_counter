@@ -14,3 +14,32 @@
 }
 svg#overlay { position: absolute; top:0; left:0; z-index:25; pointer-events: none; }
 svg#overlay line { stroke: lime; stroke-width:2; }
+
+/* Polygon styles */
+.controls {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    z-index: 40;
+    display: flex;
+    gap: 8px;
+}
+
+.controls button {
+    padding: 6px 12px;
+    background: rgba(0, 100, 0, 0.7);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.controls button:hover {
+    background: rgba(0, 130, 0, 0.9);
+}
+
+/* Polygon points */
+.poly-point {
+    pointer-events: all !important;
+}
