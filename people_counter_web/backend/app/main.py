@@ -7,6 +7,7 @@ import cv2
 import asyncio
 import json
 import psutil
+import time
 
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
@@ -25,6 +26,9 @@ async def websocket_endpoint(
     await websocket.accept()
     rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
     roi = None
+    last_stat_time = 0
+    last_cpu = 0
+    last_mem = 0
     try:
         stream = VideoStream(rtsp_url)
         detector = PersonDetector()
@@ -43,15 +47,17 @@ async def websocket_endpoint(
                         break
                 # Передаём ROI в детектор
                 result = detector.detect(frame, roi=roi)
-                # Статистика CPU/mem
-                cpu = psutil.cpu_percent()
-                mem = psutil.virtual_memory().percent
+                now = time.time()
+                if now - last_stat_time >= 2.0:
+                    last_cpu = int(round(psutil.cpu_percent()))
+                    last_mem = int(round(psutil.virtual_memory().percent))
+                    last_stat_time = now
                 await websocket.send_text(json.dumps({
                     'timestamp': stats['timestamp'],
                     'fps': stats['fps'],
                     'shape': stats['shape'],
-                    'cpu': cpu,
-                    'mem': mem,
+                    'cpu': last_cpu,
+                    'mem': last_mem,
                     'status': 'ok'
                 }))
                 await websocket.send_bytes(result)

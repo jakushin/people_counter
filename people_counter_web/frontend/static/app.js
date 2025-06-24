@@ -26,6 +26,7 @@ let roiPoints = null;
 let draggingVertex = null;
 let draggingMid = null;
 let roiScale = 1;
+let roiDragging = false;
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -114,47 +115,28 @@ function sendRoi() {
   }
 }
 
-roiSvg.addEventListener('mousemove', e => {
-  if (draggingVertex === null && draggingMid === null) return;
-  const contRect = container.getBoundingClientRect();
-  const scale = roiScale;
-  const offsetX = (contRect.width - lastImg.width * scale) / 2;
-  const offsetY = (contRect.height - lastImg.height * scale) / 2;
-  const x = (e.clientX - contRect.left - offsetX) / scale;
-  const y = (e.clientY - contRect.top - offsetY) / scale;
-  if (draggingVertex !== null) {
-    roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
-    drawRoi();
-    sendRoi();
-  } else if (draggingMid !== null) {
-    // Показывать превью новой точки не будем, просто добавим при mouseup
+function drawRoiMask(ctx, img, scale, x, y) {
+  if (!roiPoints || roiPoints.length < 3) return;
+  ctx.save();
+  // Затемняем всё
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(x, y, img.width * scale, img.height * scale);
+  // Вырезаем ROI
+  ctx.globalAlpha = 1.0;
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.beginPath();
+  const [startX, startY] = [roiPoints[0][0] * scale + x, roiPoints[0][1] * scale + y];
+  ctx.moveTo(startX, startY);
+  for (let i = 1; i < roiPoints.length; i++) {
+    ctx.lineTo(roiPoints[i][0] * scale + x, roiPoints[i][1] * scale + y);
   }
-});
-roiSvg.addEventListener('mouseup', e => {
-  if (draggingVertex !== null) draggingVertex = null;
-  if (draggingMid !== null) {
-    const contRect = container.getBoundingClientRect();
-    const scale = roiScale;
-    const offsetX = (contRect.width - lastImg.width * scale) / 2;
-    const offsetY = (contRect.height - lastImg.height * scale) / 2;
-    const x = (e.clientX - contRect.left - offsetX) / scale;
-    const y = (e.clientY - contRect.top - offsetY) / scale;
-    roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
-    draggingMid = null;
-    drawRoi();
-    sendRoi();
-  }
-});
-roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; });
-window.addEventListener('mouseup', () => { draggingVertex = null; draggingMid = null; });
-
-resetRoiBtn.onclick = () => {
-  if (lastImg) {
-    roiPoints = getDefaultRoiPoints(lastImg.width, lastImg.height);
-    drawRoi();
-    sendRoi();
-  }
-};
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+  ctx.restore();
+}
 
 function fitAndDrawImage(img) {
   const contRect = container.getBoundingClientRect();
@@ -167,6 +149,7 @@ function fitAndDrawImage(img) {
   const x = (canvas.width - imgW) / 2;
   const y = (canvas.height - imgH) / 2;
   ctx.drawImage(img, x, y, imgW, imgH);
+  drawRoiMask(ctx, img, scale, x, y);
   drawOverlay(ctx, lastStats, canvas.width, canvas.height);
   drawRoi();
 }
@@ -242,4 +225,51 @@ startBtn.onclick = () => {
   const host = document.getElementById('host').value;
   wsUrl = `ws://${window.location.hostname}:8000/ws?user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}&host=${encodeURIComponent(host)}`;
   connectWS();
+};
+
+// --- ROI mouse events ---
+function getRoiMousePos(e) {
+  const contRect = container.getBoundingClientRect();
+  const scale = roiScale;
+  const offsetX = (contRect.width - lastImg.width * scale) / 2;
+  const offsetY = (contRect.height - lastImg.height * scale) / 2;
+  const x = (e.clientX - contRect.left - offsetX) / scale;
+  const y = (e.clientY - contRect.top - offsetY) / scale;
+  return [x, y];
+}
+
+roiSvg.addEventListener('mousedown', e => {
+  roiDragging = true;
+});
+window.addEventListener('mousemove', e => {
+  if (!roiDragging) return;
+  if (draggingVertex === null && draggingMid === null) return;
+  if (!lastImg) return;
+  const [x, y] = getRoiMousePos(e);
+  if (draggingVertex !== null) {
+    roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
+    drawRoi();
+    sendRoi();
+  }
+});
+window.addEventListener('mouseup', e => {
+  roiDragging = false;
+  if (draggingVertex !== null) draggingVertex = null;
+  if (draggingMid !== null) {
+    if (!lastImg) return;
+    const [x, y] = getRoiMousePos(e);
+    roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
+    draggingMid = null;
+    drawRoi();
+    sendRoi();
+  }
+});
+roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; roiDragging = false; });
+
+resetRoiBtn.onclick = () => {
+  if (lastImg) {
+    roiPoints = getDefaultRoiPoints(lastImg.width, lastImg.height);
+    drawRoi();
+    sendRoi();
+  }
 }; 
