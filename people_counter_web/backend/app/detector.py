@@ -4,10 +4,11 @@ import logging
 from ultralytics import YOLO
 import sys
 import contextlib
+import os
 
 @contextlib.contextmanager
 def suppress_stdout_stderr():
-    with open('/dev/null', 'w') as devnull:
+    with open(os.devnull, 'w') as devnull:
         old_stdout = sys.stdout
         old_stderr = sys.stderr
         sys.stdout = devnull
@@ -17,6 +18,11 @@ def suppress_stdout_stderr():
         finally:
             sys.stdout = old_stdout
             sys.stderr = old_stderr
+
+# Подавить OpenCV/ffmpeg логи
+os.environ['OPENCV_LOG_LEVEL'] = 'SILENT'
+os.environ['OPENCV_FFMPEG_DEBUG'] = '0'
+cv2.setLogLevel(0)
 
 class PersonDetector:
     def __init__(self):

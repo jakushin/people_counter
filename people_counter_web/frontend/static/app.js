@@ -88,6 +88,14 @@ function drawRoi() {
     circle.setAttribute('r', 8);
     circle.setAttribute('class', 'roi-vertex');
     circle.addEventListener('mousedown', e => { draggingVertex = i; e.stopPropagation(); });
+    circle.addEventListener('dblclick', e => {
+      e.stopPropagation();
+      if (roiPoints.length > 3) {
+        roiPoints.splice(i, 1);
+        drawRoi();
+        sendRoi();
+      }
+    });
     roiSvg.appendChild(circle);
   });
   // Средние точки
