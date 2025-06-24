@@ -1,11 +1,10 @@
 // polygon-editor.js
 const img = document.getElementById('video');
 const svg = document.getElementById('overlay');
+// Если нужно только две точки (как линия), можно начать с двух:
 let points = [
-  [150, 100],
-  [300, 120],
-  [280, 200],
-  [180, 220]
+  [200, 200],
+  [400, 200]
 ];
 let draggingPoint = null;
 let draggingMid = null;
@@ -24,7 +23,6 @@ function getMidPoint(p1, p2) {
 }
 
 function scalePointsToImg() {
-  // Масштабируем точки к текущему размеру изображения
   const cr = img.getBoundingClientRect();
   const scaleX = cr.width / img.naturalWidth;
   const scaleY = cr.height / img.naturalHeight;
@@ -32,7 +30,6 @@ function scalePointsToImg() {
 }
 
 function scalePointFromScreen(x, y) {
-  // Переводим координаты с экрана в координаты изображения
   const cr = img.getBoundingClientRect();
   const scaleX = img.naturalWidth / cr.width;
   const scaleY = img.naturalHeight / cr.height;
@@ -41,14 +38,23 @@ function scalePointFromScreen(x, y) {
 
 function drawPolygon() {
   svg.innerHTML = '';
-  const cr = img.getBoundingClientRect();
   const scaled = scalePointsToImg();
-  // Draw polygon area
-  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-  polygon.setAttribute('points', scaled.map(p => p.join(',')).join(' '));
-  polygon.setAttribute('class', 'polygon-area');
-  svg.appendChild(polygon);
-
+  // Если две точки — рисуем линию, иначе полигон
+  if (points.length === 2) {
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('x1', scaled[0][0]);
+    line.setAttribute('y1', scaled[0][1]);
+    line.setAttribute('x2', scaled[1][0]);
+    line.setAttribute('y2', scaled[1][1]);
+    line.setAttribute('stroke', '#007bff');
+    line.setAttribute('stroke-width', 3);
+    svg.appendChild(line);
+  } else {
+    const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    polygon.setAttribute('points', scaled.map(p => p.join(',')).join(' '));
+    polygon.setAttribute('class', 'polygon-area');
+    svg.appendChild(polygon);
+  }
   // Draw vertices
   scaled.forEach((p, i) => {
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -62,39 +68,39 @@ function drawPolygon() {
     });
     svg.appendChild(circle);
   });
-
-  // Draw midpoints
-  for (let i = 0; i < scaled.length; i++) {
-    const next = (i+1)%scaled.length;
-    const mid = getMidPoint(scaled[i], scaled[next]);
-    const midCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    midCircle.setAttribute('cx', mid[0]);
-    midCircle.setAttribute('cy', mid[1]);
-    midCircle.setAttribute('r', 6);
-    midCircle.setAttribute('class', 'midpoint');
-    midCircle.addEventListener('mousedown', (e) => {
-      draggingMid = i+1;
-      e.stopPropagation();
-    });
-    svg.appendChild(midCircle);
+  // Draw midpoints (если больше двух точек)
+  if (points.length > 2) {
+    for (let i = 0; i < scaled.length; i++) {
+      const next = (i+1)%scaled.length;
+      const mid = getMidPoint(scaled[i], scaled[next]);
+      const midCircle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      midCircle.setAttribute('cx', mid[0]);
+      midCircle.setAttribute('cy', mid[1]);
+      midCircle.setAttribute('r', 6);
+      midCircle.setAttribute('class', 'midpoint');
+      midCircle.addEventListener('mousedown', (e) => {
+        draggingMid = i+1;
+        e.stopPropagation();
+      });
+      svg.appendChild(midCircle);
+    }
   }
 }
 
 drawPolygon();
 
-svg.addEventListener('mousemove', (e) => {
-  const cr = svg.getBoundingClientRect();
-  const x = e.clientX - cr.left;
-  const y = e.clientY - cr.top;
+window.addEventListener('mousemove', (e) => {
   if (draggingPoint !== null) {
-    // Переводим координаты обратно в оригинальные
+    const cr = svg.getBoundingClientRect();
+    const x = e.clientX - cr.left;
+    const y = e.clientY - cr.top;
     const [imgX, imgY] = scalePointFromScreen(x, y);
     points[draggingPoint] = [imgX, imgY];
     drawPolygon();
   }
 });
 
-svg.addEventListener('mouseup', (e) => {
+window.addEventListener('mouseup', (e) => {
   if (draggingPoint !== null) {
     draggingPoint = null;
   }

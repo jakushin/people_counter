@@ -12,7 +12,7 @@
     background: rgba(255,0,0,0.8); border:2px solid #fff; border-radius:50%;
     cursor: grab; z-index: 30; user-select: none;
 }
-svg#overlay { position: absolute; top:0; left:0; z-index:25; pointer-events: none; }
+svg#overlay { position: absolute; top:0; left:0; z-index:25; }
 svg#overlay line { stroke: lime; stroke-width:2; }
 
 /* --- polygon editor styles --- */
