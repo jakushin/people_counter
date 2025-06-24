@@ -2,8 +2,7 @@ const canvas = document.getElementById('video-canvas');
 const ctx = canvas.getContext('2d');
 const statusDiv = document.getElementById('status');
 const startBtn = document.getElementById('start-btn');
-const scaleSlider = document.getElementById('scale-slider');
-const scaleValue = document.getElementById('scale-value');
+const container = document.getElementById('container');
 
 let ws = null;
 let running = false;
@@ -19,6 +18,7 @@ let lastStats = {
   bitrate: null,
   status: 'Нет соединения'
 };
+let bytesReceived = [];
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -44,23 +44,30 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.restore();
 }
 
-function drawImageWithScale(img) {
-  const scale = parseInt(scaleSlider.value, 10) / 100;
-  const w = Math.round(img.width * scale);
-  const h = Math.round(img.height * scale);
-  canvas.width = w;
-  canvas.height = h;
-  ctx.clearRect(0, 0, w, h);
-  ctx.drawImage(img, 0, 0, w, h);
-  drawOverlay(ctx, lastStats, w, h);
+function fitAndDrawImage(img) {
+  // canvas всегда равен размеру контейнера
+  const contRect = container.getBoundingClientRect();
+  canvas.width = contRect.width;
+  canvas.height = contRect.height;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // вычисляем масштаб fit to window
+  const scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+  const imgW = img.width * scale;
+  const imgH = img.height * scale;
+  // центрируем
+  const x = (canvas.width - imgW) / 2;
+  const y = (canvas.height - imgH) / 2;
+  ctx.drawImage(img, x, y, imgW, imgH);
+  drawOverlay(ctx, lastStats, canvas.width, canvas.height);
 }
 
-scaleSlider.oninput = function() {
-  scaleValue.textContent = scaleSlider.value;
+function updateFit() {
   if (lastImg) {
-    drawImageWithScale(lastImg);
+    fitAndDrawImage(lastImg);
   }
-};
+}
+
+window.addEventListener('resize', updateFit);
 
 function connectWS() {
   if (!wsUrl) return;
@@ -72,6 +79,7 @@ function connectWS() {
   ws.onopen = () => {
     setStatus('Поток запущен');
     lastStats.status = 'Поток запущен';
+    bytesReceived = [];
   };
   ws.onerror = e => {
     setStatus('Ошибка WebSocket', true);
@@ -89,23 +97,29 @@ function connectWS() {
         const stats = JSON.parse(event.data);
         lastStats = {...lastStats, ...stats};
         lastStats.status = 'Поток запущен';
-        if (lastImg) drawImageWithScale(lastImg);
+        // bitrate вычисляется по bytesReceived
+        const now = Date.now();
+        bytesReceived = bytesReceived.filter(b => now - b.t < 2000); // 2 сек
+        const total = bytesReceived.reduce((s, b) => s + b.n, 0);
+        lastStats.bitrate = (total * 8 / 2 / 1000).toFixed(1) + ' kbps';
+        if (lastImg) updateFit();
       } catch(e) {}
       return;
     }
     // бинарные данные (jpeg)
     const blob = new Blob([event.data], {type: 'image/jpeg'});
+    bytesReceived.push({n: blob.size, t: Date.now()});
     const img = new window.Image();
     img.onload = function() {
       lastImg = img;
       lastImgW = img.width;
       lastImgH = img.height;
-      drawImageWithScale(img);
+      updateFit();
     };
     img.onerror = function() {
       setStatus('Ошибка декодирования изображения', true);
       lastStats.status = 'Ошибка декодирования';
-      if (lastImg) drawImageWithScale(lastImg);
+      if (lastImg) updateFit();
     };
     img.src = URL.createObjectURL(blob);
   };
