@@ -62,4 +62,4 @@ class VideoStream:
                 'fps': round(self.fps, 2),
                 'shape': frame.shape[:2][::-1]  # (width, height)
             }
-            await asyncio.sleep(0.1)  # ~10 fps 
+            await asyncio.sleep(0.01)  # минимальная пауза для предотвращения 100% CPU 
