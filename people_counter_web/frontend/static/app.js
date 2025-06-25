@@ -27,6 +27,7 @@ let draggingVertex = null;
 let draggingMid = null;
 let roiScale = 1;
 let pendingRoi = null; // Для хранения ROI, если lastImg ещё не загружен
+let roiReceivedFromBackend = false; // Новый флаг
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -175,6 +176,7 @@ function connectWS() {
   ws.binaryType = 'arraybuffer';
   setStatus('Подключение...', false);
   lastStats.status = 'Подключение...';
+  roiReceivedFromBackend = false; // Сброс при новом подключении
   ws.onopen = () => {
     setStatus('Поток запущен');
     lastStats.status = 'Поток запущен';
@@ -197,6 +199,7 @@ function connectWS() {
         const stats = JSON.parse(event.data);
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
+          roiReceivedFromBackend = true;
           if (lastImg) {
             roiPoints = stats.points;
             drawRoi();
@@ -222,17 +225,18 @@ function connectWS() {
       if (pendingRoi) {
         roiPoints = pendingRoi;
         pendingRoi = null;
+        roiReceivedFromBackend = true;
         drawRoi();
         sendRoi();
       } else if (!roiPoints) {
-        // Ждём ROI от backend, если не пришёл — fallback
+        // Ждём ROI от backend 500 мс, если не пришёл — fallback
         setTimeout(() => {
-          if (!roiPoints) {
+          if (!roiPoints && !roiReceivedFromBackend) {
             roiPoints = getDefaultRoiPoints(img.width, img.height);
-            sendRoi();
             drawRoi();
+            // Не отправляем дефолтный ROI на backend, если не было ROI от backend
           }
-        }, 200);
+        }, 500);
       }
       updateFit();
     };
