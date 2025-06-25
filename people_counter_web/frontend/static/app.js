@@ -177,10 +177,10 @@ function connectWS() {
   ws.onopen = () => {
     setStatus('Поток запущен');
     lastStats.status = 'Поток запущен';
+    // Не инициализируем roiPoints по умолчанию здесь!
+    // Ждём ROI от backend или fallback в onload изображения
     if (lastImg) {
-      roiPoints = getDefaultRoiPoints(lastImg.width, lastImg.height);
       drawRoi();
-      sendRoi();
     }
   };
   ws.onerror = e => {
@@ -222,6 +222,7 @@ function connectWS() {
           if (!roiPoints) {
             roiPoints = getDefaultRoiPoints(img.width, img.height);
             sendRoi();
+            drawRoi();
           }
         }, 200);
       }
@@ -256,20 +257,14 @@ function getRoiMousePos(e) {
   return [x, y];
 }
 
-window.addEventListener('mousemove', e => {
-  if (draggingVertex !== null && lastImg) {
+// --- Улучшенный drag&drop ---
+let mouseDown = false;
+document.addEventListener('mousedown', e => { mouseDown = true; });
+document.addEventListener('mouseup', e => { mouseDown = false; if (draggingVertex !== null) draggingVertex = null; if (draggingMid !== null && lastImg) { const [x, y] = getRoiMousePos(e); roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]); draggingMid = null; drawRoi(); sendRoi(); } });
+document.addEventListener('mousemove', e => {
+  if (draggingVertex !== null && lastImg && mouseDown) {
     const [x, y] = getRoiMousePos(e);
     roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
-    drawRoi();
-    sendRoi();
-  }
-});
-window.addEventListener('mouseup', e => {
-  if (draggingVertex !== null) draggingVertex = null;
-  if (draggingMid !== null && lastImg) {
-    const [x, y] = getRoiMousePos(e);
-    roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
-    draggingMid = null;
     drawRoi();
     sendRoi();
   }
