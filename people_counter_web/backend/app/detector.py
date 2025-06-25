@@ -49,7 +49,7 @@ class PersonDetector:
             with suppress_all_output():
                 results = self.model(frame, imgsz=(w, h))
             annotated = frame.copy()
-            # Подсветка только если ключевые точки головы и обоих плеч внутри ROI
+            # Подсветка только если ключевые точки головы и хотя бы одного плеча внутри ROI
             if results and len(results[0].keypoints) > 0:
                 kps = results[0].keypoints.xy.cpu().numpy()  # (N, 17, 2)
                 for i, kp in enumerate(kps):
@@ -60,10 +60,10 @@ class PersonDetector:
                     inside = True
                     if roi and len(roi) >= 3:
                         pts = np.array(roi, dtype=np.int32)
-                        # Проверяем, что nose и оба плеча внутри ROI
+                        # Проверяем, что nose и хотя бы одно плечо внутри ROI
                         inside = (cv2.pointPolygonTest(pts, tuple(nose), False) >= 0 and
-                                  cv2.pointPolygonTest(pts, tuple(l_shoulder), False) >= 0 and
-                                  cv2.pointPolygonTest(pts, tuple(r_shoulder), False) >= 0)
+                                  (cv2.pointPolygonTest(pts, tuple(l_shoulder), False) >= 0 or
+                                   cv2.pointPolygonTest(pts, tuple(r_shoulder), False) >= 0))
                     if inside:
                         # bbox по ключевым точкам (голова+туловище)
                         min_x = int(np.min(kp[:,0]))
