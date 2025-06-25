@@ -46,8 +46,10 @@ class PersonDetector:
     def detect(self, frame, roi=None):
         try:
             h, w = frame.shape[:2]
+            # imgsz явно больше, чем размер кадра (например, 1280)
+            imgsz = max(1280, w, h)
             with suppress_all_output():
-                results = self.model(frame, imgsz=(w, h))
+                results = self.model(frame, imgsz=imgsz, conf=0.2)
             annotated = frame.copy()
             # Подсветка только если ключевые точки головы и хотя бы одного плеча внутри ROI
             if results and len(results[0].keypoints) > 0:
@@ -73,7 +75,7 @@ class PersonDetector:
                         # Фильтрация по размеру и соотношению сторон
                         bw, bh = max_x - min_x, max_y - min_y
                         aspect = bh / (bw+1e-5)
-                        if bw > 30 and bh > 60 and aspect > 1.2:
+                        if bw > 15 and bh > 30 and aspect > 1.2:
                             cv2.rectangle(annotated, (min_x, min_y), (max_x, max_y), (0,255,0), 2)
                             # Нарисовать ключевые точки головы и плеч
                             for idx in [0,5,6]:

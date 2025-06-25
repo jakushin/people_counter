@@ -8,9 +8,29 @@ import asyncio
 import json
 import psutil
 import time
+import os
 
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
+
+ROI_FILE = '/data/roi.json'
+
+def load_roi():
+    try:
+        if os.path.exists(ROI_FILE):
+            with open(ROI_FILE, 'r') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.error(f'Failed to load ROI: {e}')
+    return None
+
+def save_roi(roi):
+    try:
+        os.makedirs(os.path.dirname(ROI_FILE), exist_ok=True)
+        with open(ROI_FILE, 'w') as f:
+            json.dump(roi, f)
+    except Exception as e:
+        logging.error(f'Failed to save ROI: {e}')
 
 @app.get("/")
 def root():
@@ -25,7 +45,7 @@ async def websocket_endpoint(
 ):
     await websocket.accept()
     rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
-    roi = None
+    roi = load_roi()
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0
@@ -35,12 +55,15 @@ async def websocket_endpoint(
         async for frame, stats in stream.async_frames():
             try:
                 # Получаем ROI от клиента (если есть)
+                roi_changed = False
                 while websocket.client_state.value == 1:
                     try:
                         msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
                         data = json.loads(msg)
                         if data.get('type') == 'roi':
                             roi = data.get('points')
+                            save_roi(roi)
+                            roi_changed = True
                     except asyncio.TimeoutError:
                         break
                     except Exception:
