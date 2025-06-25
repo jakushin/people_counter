@@ -5,6 +5,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
 
 ENV FFREPORT=file=/dev/null:level=32
+ENV OPENCV_FFMPEG_DEBUG=0
+ENV LIBAV_LOGLEVEL=quiet
+ENV AV_LOG_FORCE_NOCOLOR=1
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
