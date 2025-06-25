@@ -200,12 +200,10 @@ function connectWS() {
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
           roiReceivedFromBackend = true;
-          if (lastImg) {
-            roiPoints = stats.points;
-            drawRoi();
-          } else {
-            pendingRoi = stats.points;
-          }
+          roiPoints = stats.points; // ВСЕГДА применяем ROI от backend
+          drawRoi();
+          updateFit();
+          // Не отправляем ROI обратно на backend
           return;
         }
         lastStats = {...lastStats, ...stats};
@@ -226,13 +224,14 @@ function connectWS() {
         pendingRoi = null;
         roiReceivedFromBackend = true;
         drawRoi();
+        updateFit();
+        // Не отправляем ROI обратно на backend
       } else if (!roiPoints) {
         // Ждём ROI от backend 500 мс, если не пришёл — fallback
         setTimeout(() => {
           if (!roiPoints && !roiReceivedFromBackend) {
             roiPoints = getDefaultRoiPoints(img.width, img.height);
             drawRoi();
-            // Не отправляем дефолтный ROI на backend, если не было ROI от backend
           }
         }, 500);
       }
