@@ -1,13 +1,13 @@
-FROM python:3.10-slim
+FROM continuumio/miniconda3:latest
 WORKDIR /app
 
-# Установить libGL и libglib2.0 для OpenCV
-RUN apt-get update && apt-get install -y libgl1 libglib2.0-0 && rm -rf /var/lib/apt/lists/*
+# Установить ffmpeg, opencv, numpy, ultralytics через conda
+RUN conda install -y -c conda-forge ffmpeg opencv numpy && \
+    pip install ultralytics fastapi uvicorn psutil
 
-ENV FFREPORT=file=/dev/null:level=32
-ENV OPENCV_FFMPEG_DEBUG=0
-ENV LIBAV_LOGLEVEL=quiet
-ENV AV_LOG_FORCE_NOCOLOR=1
+# Вывести версии основных библиотек
+RUN python -c "import cv2, numpy, ultralytics, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__)" && \
+    ffmpeg -version | head -1
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
