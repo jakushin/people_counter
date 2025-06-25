@@ -10,6 +10,14 @@ import psutil
 import time
 import os
 
+try:
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_WARNING)
+except AttributeError:
+    try:
+        cv2.setLogLevel(cv2.LOG_LEVEL_WARNING)
+    except AttributeError:
+        pass  # Нет поддержки suppression
+
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
 
@@ -46,6 +54,9 @@ async def websocket_endpoint(
     await websocket.accept()
     rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
     roi = load_roi()
+    # Сразу отправляем ROI клиенту, если оно есть
+    if roi:
+        await websocket.send_text(json.dumps({"type": "roi", "points": roi}))
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0
@@ -54,7 +65,6 @@ async def websocket_endpoint(
         detector = PersonDetector()
         async for frame, stats in stream.async_frames():
             try:
-                # Получаем ROI от клиента (если есть)
                 roi_changed = False
                 while websocket.client_state.value == 1:
                     try:
@@ -68,7 +78,6 @@ async def websocket_endpoint(
                         break
                     except Exception:
                         break
-                # Передаём ROI в детектор
                 result = detector.detect(frame, roi=roi)
                 now = time.time()
                 if now - last_stat_time >= 2.0:

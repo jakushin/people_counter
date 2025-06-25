@@ -196,6 +196,13 @@ function connectWS() {
     if (typeof event.data === 'string') {
       try {
         const stats = JSON.parse(event.data);
+        // Если это ROI от backend
+        if (stats.type === 'roi' && Array.isArray(stats.points)) {
+          roiPoints = stats.points;
+          drawRoi();
+          sendRoi();
+          return;
+        }
         lastStats = {...lastStats, ...stats};
         lastStats.status = 'Поток запущен';
         if (lastImg) updateFit();
@@ -208,9 +215,15 @@ function connectWS() {
       lastImg = img;
       lastImgW = img.width;
       lastImgH = img.height;
+      // Не инициализируем roiPoints по умолчанию, если он уже есть
       if (!roiPoints) {
-        roiPoints = getDefaultRoiPoints(img.width, img.height);
-        sendRoi();
+        // Ждём ROI от backend, если не пришёл — fallback
+        setTimeout(() => {
+          if (!roiPoints) {
+            roiPoints = getDefaultRoiPoints(img.width, img.height);
+            sendRoi();
+          }
+        }, 200);
       }
       updateFit();
     };
