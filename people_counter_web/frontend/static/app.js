@@ -203,7 +203,6 @@ function connectWS() {
           if (lastImg) {
             roiPoints = stats.points;
             drawRoi();
-            sendRoi();
           } else {
             pendingRoi = stats.points;
           }
@@ -227,7 +226,6 @@ function connectWS() {
         pendingRoi = null;
         roiReceivedFromBackend = true;
         drawRoi();
-        sendRoi();
       } else if (!roiPoints) {
         // Ждём ROI от backend 500 мс, если не пришёл — fallback
         setTimeout(() => {
