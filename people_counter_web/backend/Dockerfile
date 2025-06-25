@@ -1,6 +1,9 @@
 FROM continuumio/miniconda3:latest
 WORKDIR /app
 
+# Установить libGL для OpenCV
+RUN apt-get update && apt-get install -y libgl1
+
 # Установить ffmpeg, opencv, numpy, ultralytics через conda
 RUN conda install -y -c conda-forge ffmpeg opencv numpy && \
     pip install ultralytics fastapi uvicorn psutil
