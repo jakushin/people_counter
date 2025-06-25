@@ -44,21 +44,15 @@ class PersonDetector:
 
     def detect(self, frame, roi=None):
         try:
-            # Убираем создание маски и закрашивание - показываем оригинальный кадр
             frame_roi = frame
-            
             with suppress_all_output():
                 results = self.model(frame_roi, classes=[0])
-            
             annotated = results[0].plot(line_width=1, labels=False, conf=False)
-            
-            # Нарисовать ROI полигон поверх кадра (только контур, без закрашивания)
             if roi and len(roi) >= 3:
                 pts = np.array(roi, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
-            
             _, jpeg = cv2.imencode('.jpg', annotated)
             return jpeg.tobytes()
         except Exception as e:
-            logging.error(f'Detection error: {e}')
+            logging.error(f'Detection error: {e}', exc_info=True)
             return b'' 
