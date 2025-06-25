@@ -26,6 +26,7 @@ let roiPoints = null;
 let draggingVertex = null;
 let draggingMid = null;
 let roiScale = 1;
+let pendingRoi = null; // Для хранения ROI, если lastImg ещё не загружен
 
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
@@ -177,8 +178,6 @@ function connectWS() {
   ws.onopen = () => {
     setStatus('Поток запущен');
     lastStats.status = 'Поток запущен';
-    // Не инициализируем roiPoints по умолчанию здесь!
-    // Ждём ROI от backend или fallback в onload изображения
     if (lastImg) {
       drawRoi();
     }
@@ -198,9 +197,13 @@ function connectWS() {
         const stats = JSON.parse(event.data);
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
-          roiPoints = stats.points;
-          drawRoi();
-          sendRoi();
+          if (lastImg) {
+            roiPoints = stats.points;
+            drawRoi();
+            sendRoi();
+          } else {
+            pendingRoi = stats.points;
+          }
           return;
         }
         lastStats = {...lastStats, ...stats};
@@ -215,8 +218,13 @@ function connectWS() {
       lastImg = img;
       lastImgW = img.width;
       lastImgH = img.height;
-      // Не инициализируем roiPoints по умолчанию, если он уже есть
-      if (!roiPoints) {
+      // Если есть pendingRoi — применяем его
+      if (pendingRoi) {
+        roiPoints = pendingRoi;
+        pendingRoi = null;
+        drawRoi();
+        sendRoi();
+      } else if (!roiPoints) {
         // Ждём ROI от backend, если не пришёл — fallback
         setTimeout(() => {
           if (!roiPoints) {
@@ -257,19 +265,53 @@ function getRoiMousePos(e) {
   return [x, y];
 }
 
-// --- Улучшенный drag&drop ---
-let mouseDown = false;
-document.addEventListener('mousedown', e => { mouseDown = true; });
-document.addEventListener('mouseup', e => { mouseDown = false; if (draggingVertex !== null) draggingVertex = null; if (draggingMid !== null && lastImg) { const [x, y] = getRoiMousePos(e); roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]); draggingMid = null; drawRoi(); sendRoi(); } });
-document.addEventListener('mousemove', e => {
-  if (draggingVertex !== null && lastImg && mouseDown) {
+// --- ROI pointer events ---
+let pointerDown = false;
+let pointerId = null;
+roiSvg.addEventListener('pointerdown', e => {
+  if (e.target.classList.contains('roi-vertex')) {
+    draggingVertex = parseInt(e.target.getAttribute('data-idx'));
+    pointerDown = true;
+    pointerId = e.pointerId;
+    roiSvg.setPointerCapture(pointerId);
+    e.stopPropagation();
+  } else if (e.target.classList.contains('roi-midpoint')) {
+    draggingMid = Array.from(roiSvg.querySelectorAll('.roi-midpoint')).indexOf(e.target) + 1;
+    pointerDown = true;
+    pointerId = e.pointerId;
+    roiSvg.setPointerCapture(pointerId);
+    e.stopPropagation();
+  }
+});
+roiSvg.addEventListener('pointermove', e => {
+  if (!pointerDown || e.pointerId !== pointerId) return;
+  if (draggingVertex !== null && lastImg) {
     const [x, y] = getRoiMousePos(e);
     roiPoints[draggingVertex] = [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))];
     drawRoi();
     sendRoi();
   }
 });
-roiSvg.addEventListener('mouseleave', () => { draggingVertex = null; draggingMid = null; });
+roiSvg.addEventListener('pointerup', e => {
+  if (e.pointerId !== pointerId) return;
+  pointerDown = false;
+  pointerId = null;
+  if (draggingVertex !== null) draggingVertex = null;
+  if (draggingMid !== null && lastImg) {
+    const [x, y] = getRoiMousePos(e);
+    roiPoints.splice(draggingMid, 0, [Math.max(0, Math.min(lastImg.width, x)), Math.max(0, Math.min(lastImg.height, y))]);
+    draggingMid = null;
+    drawRoi();
+    sendRoi();
+  }
+  roiSvg.releasePointerCapture(e.pointerId);
+});
+roiSvg.addEventListener('pointerleave', e => {
+  pointerDown = false;
+  pointerId = null;
+  draggingVertex = null;
+  draggingMid = null;
+});
 
 resetRoiBtn.onclick = () => {
   if (lastImg) {
