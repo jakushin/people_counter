@@ -37,7 +37,8 @@ class PersonDetector:
     def __init__(self):
         try:
             with suppress_all_output():
-                self.model = YOLO('yolov8n.pt')
+                # Используем pose-модель
+                self.model = YOLO('yolov8n-pose.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
@@ -45,28 +46,46 @@ class PersonDetector:
     def detect(self, frame, roi=None):
         try:
             h, w = frame.shape[:2]
-            # YOLO анализирует полный кадр
             with suppress_all_output():
-                results = self.model(frame, classes=[0], imgsz=(w, h))
+                results = self.model(frame, imgsz=(w, h))
             annotated = frame.copy()
-            # Подсветка bbox только если центр внутри ROI
-            if results and len(results[0].boxes) > 0:
-                boxes = results[0].boxes.xyxy.cpu().numpy()
-                for box in boxes:
-                    x1, y1, x2, y2 = map(int, box[:4])
-                    cx = int((x1 + x2) / 2)
-                    cy = int((y1 + y2) / 2)
+            # Подсветка только если ключевые точки головы и обоих плеч внутри ROI
+            if results and len(results[0].keypoints) > 0:
+                kps = results[0].keypoints.xy.cpu().numpy()  # (N, 17, 2)
+                for i, kp in enumerate(kps):
+                    # YOLOv8-pose: 0 - nose, 5 - left shoulder, 6 - right shoulder
+                    nose = kp[0]
+                    l_shoulder = kp[5]
+                    r_shoulder = kp[6]
                     inside = True
                     if roi and len(roi) >= 3:
                         pts = np.array(roi, dtype=np.int32)
-                        inside = cv2.pointPolygonTest(pts, (cx, cy), False) >= 0
+                        # Проверяем, что nose и оба плеча внутри ROI
+                        inside = (cv2.pointPolygonTest(pts, tuple(nose), False) >= 0 and
+                                  cv2.pointPolygonTest(pts, tuple(l_shoulder), False) >= 0 and
+                                  cv2.pointPolygonTest(pts, tuple(r_shoulder), False) >= 0)
                     if inside:
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
+                        # bbox по ключевым точкам (голова+туловище)
+                        min_x = int(np.min(kp[:,0]))
+                        min_y = int(np.min(kp[:,1]))
+                        max_x = int(np.max(kp[:,0]))
+                        max_y = int(np.max(kp[:,1]))
+                        # Фильтрация по размеру и соотношению сторон
+                        bw, bh = max_x - min_x, max_y - min_y
+                        aspect = bh / (bw+1e-5)
+                        if bw > 30 and bh > 60 and aspect > 1.2:
+                            cv2.rectangle(annotated, (min_x, min_y), (max_x, max_y), (0,255,0), 2)
+                            # Нарисовать ключевые точки головы и плеч
+                            for idx in [0,5,6]:
+                                x, y = int(kp[idx][0]), int(kp[idx][1])
+                                cv2.circle(annotated, (x, y), 4, (0,255,255), -1)
             # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
                 pts = np.array(roi, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
-            _, jpeg = cv2.imencode('.jpg', annotated)
+            # JPEG качество 95
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+            _, jpeg = cv2.imencode('.jpg', annotated, encode_param)
             return jpeg.tobytes()
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
