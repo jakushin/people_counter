@@ -44,10 +44,25 @@ class PersonDetector:
 
     def detect(self, frame, roi=None):
         try:
-            frame_roi = frame
+            h, w = frame.shape[:2]
+            # YOLO анализирует полный кадр
             with suppress_all_output():
-                results = self.model(frame_roi, classes=[0])
-            annotated = results[0].plot(line_width=1, labels=False, conf=False)
+                results = self.model(frame, classes=[0], imgsz=(w, h))
+            annotated = frame.copy()
+            # Подсветка bbox только если центр внутри ROI
+            if results and len(results[0].boxes) > 0:
+                boxes = results[0].boxes.xyxy.cpu().numpy()
+                for box in boxes:
+                    x1, y1, x2, y2 = map(int, box[:4])
+                    cx = int((x1 + x2) / 2)
+                    cy = int((y1 + y2) / 2)
+                    inside = True
+                    if roi and len(roi) >= 3:
+                        pts = np.array(roi, dtype=np.int32)
+                        inside = cv2.pointPolygonTest(pts, (cx, cy), False) >= 0
+                    if inside:
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
+            # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
                 pts = np.array(roi, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
