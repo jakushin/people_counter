@@ -100,6 +100,17 @@ def start_video_stream(video_filename: str) -> bool:
     """Запустить видео как RTSP поток"""
     global current_video_process, current_video_file
     
+    # Проверяем доступность ffmpeg
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            logging.error(f'FFmpeg not available: {result.stderr}')
+            return False
+        logging.info(f'FFmpeg version: {result.stdout.split()[2]}')
+    except Exception as e:
+        logging.error(f'FFmpeg check failed: {e}')
+        return False
+    
     # Остановить предыдущий процесс
     stop_current_video()
     
@@ -120,8 +131,11 @@ def start_video_stream(video_filename: str) -> bool:
             '-preset', 'ultrafast',  # быстрый пресет
             '-tune', 'zerolatency',  # минимальная задержка
             '-f', 'rtsp',
+            '-rtsp_transport', 'tcp',  # использовать TCP вместо UDP
             f'rtsp://0.0.0.0:{RTSP_PORT}/test'
         ]
+        
+        logging.info(f'[FFMPEG] Starting command: {" ".join(cmd)}')
         
         current_video_process = subprocess.Popen(
             cmd,
@@ -137,11 +151,45 @@ def start_video_stream(video_filename: str) -> bool:
             logging.info(f'Started video stream: {video_filename}')
             return True
         else:
-            logging.error(f'Failed to start video stream: {video_filename}')
-            return False
+            # Получить вывод ошибки
+            stdout, stderr = current_video_process.communicate()
+            logging.error(f'FFmpeg RTSP failed. Return code: {current_video_process.returncode}')
+            logging.error(f'FFmpeg stdout: {stdout.decode()}')
+            logging.error(f'FFmpeg stderr: {stderr.decode()}')
+            
+            # Попробуем HTTP поток как альтернативу
+            logging.info(f'[FFMPEG] Trying HTTP stream as alternative...')
+            http_cmd = [
+                'ffmpeg',
+                '-re',
+                '-stream_loop', '-1',
+                '-i', video_path,
+                '-vf', 'scale=1280:960,fps=10',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-f', 'mpegts',
+                f'http://0.0.0.0:{RTSP_PORT}/test'
+            ]
+            
+            logging.info(f'[FFMPEG] HTTP command: {" ".join(http_cmd)}')
+            current_video_process = subprocess.Popen(
+                http_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            time.sleep(2)
+            if current_video_process.poll() is None:
+                logging.info(f'Started HTTP video stream: {video_filename}')
+                return True
+            else:
+                stdout, stderr = current_video_process.communicate()
+                logging.error(f'FFmpeg HTTP also failed. Return code: {current_video_process.returncode}')
+                logging.error(f'FFmpeg HTTP stderr: {stderr.decode()}')
+                return False
             
     except Exception as e:
-        logging.error(f'Error starting video stream: {e}')
+        logging.error(f'Error starting video stream: {e}', exc_info=True)
         return False
 
 @app.get("/")
