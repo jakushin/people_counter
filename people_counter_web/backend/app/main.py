@@ -75,7 +75,7 @@ async def websocket_endpoint(
     try:
         stream = VideoStream(rtsp_url)
         #detector = PersonDetector()
-        detector = MultiprocessPersonDetector()
+        detector = MultiprocessPersonDetector(num_workers=4)
         logging.info(f"[MAIN] Using detector class: {type(detector)}, PID: {os.getpid()}")
         async for frame, stats in stream.async_frames():
             try:

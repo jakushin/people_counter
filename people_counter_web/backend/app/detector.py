@@ -69,8 +69,10 @@ class PersonDetector:
             pid = os.getpid()
             cpu_percent = psutil.cpu_percent(interval=None)
             cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+            mem = psutil.virtual_memory()
+            proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
             import torch
-            logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}")
+            logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             with suppress_all_output():
                 results = self.model(frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
@@ -128,6 +130,9 @@ class MultiprocessPersonDetector:
     def worker(input_queue, output_queue, worker_idx):
         logging.info(f"[MP_WORKER] Worker {worker_idx} started, PID: {os.getpid()}")
         detector = PersonDetector()
+        mem = psutil.virtual_memory()
+        proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
+        logging.info(f"[MP_WORKER] Worker {worker_idx} PID: {os.getpid()}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
         while True:
             try:
                 idx, frame, roi = input_queue.get(timeout=1)
