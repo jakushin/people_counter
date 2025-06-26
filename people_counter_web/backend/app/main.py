@@ -1,6 +1,6 @@
 import logging
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from app.video_stream import VideoStream
 from app.detector import PersonDetector, MultiprocessPersonDetector
 import cv2
@@ -10,6 +10,9 @@ import psutil
 import time
 import os
 import multiprocessing
+import subprocess
+import shutil
+from typing import List, Optional
 
 try:
     cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
@@ -33,6 +36,10 @@ os.environ['VECLIB_MAXIMUM_THREADS'] = str(multiprocessing.cpu_count())
 logging.info(f"[ENV] OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}, MKL_NUM_THREADS={os.environ['MKL_NUM_THREADS']}, NUMEXPR_NUM_THREADS={os.environ['NUMEXPR_NUM_THREADS']}, OPENBLAS_NUM_THREADS={os.environ['OPENBLAS_NUM_THREADS']}, VECLIB_MAXIMUM_THREADS={os.environ['VECLIB_MAXIMUM_THREADS']}")
 
 ROI_FILE = '/data/roi.json'
+VIDEOS_DIR = '/videos'
+RTSP_PORT = 8554
+current_video_process = None
+current_video_file = None
 
 def load_roi():
     try:
@@ -51,9 +58,135 @@ def save_roi(roi):
     except Exception as e:
         logging.error(f'Failed to save ROI: {e}')
 
+def get_video_files() -> List[str]:
+    """Получить список доступных видео файлов"""
+    try:
+        if not os.path.exists(VIDEOS_DIR):
+            os.makedirs(VIDEOS_DIR, exist_ok=True)
+        files = [f for f in os.listdir(VIDEOS_DIR) if f.lower().endswith('.mp4')]
+        return sorted(files)
+    except Exception as e:
+        logging.error(f'Failed to get video files: {e}')
+        return []
+
+def stop_current_video():
+    """Остановить текущий видео процесс"""
+    global current_video_process, current_video_file
+    if current_video_process:
+        try:
+            current_video_process.terminate()
+            current_video_process.wait(timeout=5)
+            logging.info(f'Stopped video process for {current_video_file}')
+        except subprocess.TimeoutExpired:
+            current_video_process.kill()
+            logging.warning(f'Killed video process for {current_video_file}')
+        except Exception as e:
+            logging.error(f'Error stopping video process: {e}')
+        finally:
+            current_video_process = None
+            current_video_file = None
+
+def start_video_stream(video_filename: str) -> bool:
+    """Запустить видео как RTSP поток"""
+    global current_video_process, current_video_file
+    
+    # Остановить предыдущий процесс
+    stop_current_video()
+    
+    video_path = os.path.join(VIDEOS_DIR, video_filename)
+    if not os.path.exists(video_path):
+        logging.error(f'Video file not found: {video_path}')
+        return False
+    
+    try:
+        # Команда ffmpeg для создания RTSP потока
+        cmd = [
+            'ffmpeg',
+            '-re',  # читать с реальной скоростью
+            '-stream_loop', '-1',  # бесконечный цикл
+            '-i', video_path,
+            '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
+            '-c:v', 'libx264',  # кодек
+            '-preset', 'ultrafast',  # быстрый пресет
+            '-tune', 'zerolatency',  # минимальная задержка
+            '-f', 'rtsp',
+            f'rtsp://0.0.0.0:{RTSP_PORT}/test'
+        ]
+        
+        current_video_process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        current_video_file = video_filename
+        
+        # Дать время ffmpeg запуститься
+        time.sleep(2)
+        
+        if current_video_process.poll() is None:
+            logging.info(f'Started video stream: {video_filename}')
+            return True
+        else:
+            logging.error(f'Failed to start video stream: {video_filename}')
+            return False
+            
+    except Exception as e:
+        logging.error(f'Error starting video stream: {e}')
+        return False
+
 @app.get("/")
 def root():
     return {"status": "ok"}
+
+@app.get("/api/videos")
+def get_videos():
+    """Получить список доступных видео"""
+    videos = get_video_files()
+    return {"videos": videos}
+
+@app.post("/api/videos/upload")
+async def upload_video(file: UploadFile = File(...)):
+    """Загрузить новое видео"""
+    if not file.filename.lower().endswith('.mp4'):
+        raise HTTPException(status_code=400, detail="Only MP4 files are supported")
+    
+    try:
+        # Создать папку если не существует
+        os.makedirs(VIDEOS_DIR, exist_ok=True)
+        
+        # Сохранить файл
+        file_path = os.path.join(VIDEOS_DIR, file.filename)
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        logging.info(f'Uploaded video: {file.filename}')
+        return {"message": "Video uploaded successfully", "filename": file.filename}
+        
+    except Exception as e:
+        logging.error(f'Error uploading video: {e}')
+        raise HTTPException(status_code=500, detail="Failed to upload video")
+
+@app.post("/api/videos/start")
+def start_video(video_filename: str = Query(...)):
+    """Запустить видео как RTSP поток"""
+    if not os.path.exists(os.path.join(VIDEOS_DIR, video_filename)):
+        raise HTTPException(status_code=404, detail="Video file not found")
+    
+    if start_video_stream(video_filename):
+        return {"message": f"Video stream started: {video_filename}"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to start video stream")
+
+@app.post("/api/videos/stop")
+def stop_video():
+    """Остановить текущий видео поток"""
+    stop_current_video()
+    return {"message": "Video stream stopped"}
+
+@app.get("/api/videos/current")
+def get_current_video():
+    """Получить информацию о текущем видео"""
+    return {"current_video": current_video_file}
 
 @app.websocket("/ws")
 async def websocket_endpoint(
@@ -63,7 +196,17 @@ async def websocket_endpoint(
     host: str = Query(...)
 ):
     await websocket.accept()
-    rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
+    
+    # Определяем RTSP URL в зависимости от источника
+    if current_video_file:
+        # Используем видео как RTSP поток
+        rtsp_url = f"rtsp://localhost:{RTSP_PORT}/test"
+        logging.info(f'[WS] Using video stream: {current_video_file} -> {rtsp_url}')
+    else:
+        # Используем камеру
+        rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
+        logging.info(f'[WS] Using camera stream: {rtsp_url}')
+    
     roi = load_roi()
     # Сразу отправляем ROI клиенту, если оно есть
     if roi:

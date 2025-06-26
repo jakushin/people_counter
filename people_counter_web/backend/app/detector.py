@@ -83,7 +83,7 @@ class PersonDetector:
                 logging.info(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
                 x_min, y_min = 0, 0
             crop_h, crop_w = crop_frame.shape[:2]
-            imgsz = max(128, min(640, int(np.ceil(max(crop_h, crop_w) / 32) * 32)))
+            imgsz = self.calculate_adaptive_imgsz(crop_h, crop_w, h, w)
             logging.info(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
             thread_id = threading.get_ident()
             pid = os.getpid()
@@ -94,15 +94,16 @@ class PersonDetector:
             import torch
             logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             with suppress_all_output():
-                results = self.model(crop_frame, imgsz=imgsz, conf=0.2)
+                results = self.model(crop_frame, imgsz=imgsz, conf=0.4)
             t1 = time.time()
             annotated = frame.copy()
             person_count = 0
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 clss = results[0].boxes.cls.cpu().numpy()
-                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}")
-                for box, cls_id in zip(boxes, clss):
+                confs = results[0].boxes.conf.cpu().numpy()
+                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
+                for box, cls_id, conf in zip(boxes, clss, confs):
                     if int(cls_id) != 0:
                         continue
                     x1, y1, x2, y2 = map(int, box)
@@ -111,12 +112,21 @@ class PersonDetector:
                     y1 += crop_offset[1]
                     y2 += crop_offset[1]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    bbox_w, bbox_h = x2 - x1, y2 - y1
+                    
+                    # Фильтрация по размеру bbox (отбрасываем слишком маленькие/большие)
+                    min_size = 30  # минимальный размер человека в пикселях
+                    max_size = max(crop_w, crop_h) // 2  # максимальный размер - половина crop
+                    if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
+                        logging.info(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
+                        continue
+                    
                     if pts is not None and cv2.pointPolygonTest(pts, (float(cx), float(cy)), False) < 0:
                         logging.info(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
                         continue
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
                     person_count += 1
-                    logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), center=({cx},{cy})")
+                    logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
             else:
                 logging.info(f"[DETECT] No objects detected in crop")
             t2 = time.time()
@@ -162,6 +172,35 @@ class PersonDetector:
         except Exception as e:
             logging.error(f"[EMPTY_FRAME] Error creating empty frame: {e}")
             return b''
+
+    def calculate_adaptive_imgsz(self, crop_h, crop_w, original_h, original_w):
+        """Умная подстройка imgsz под размер кадра"""
+        max_original = max(original_h, original_w)
+        
+        # Определяем максимальный imgsz на основе размера кадра
+        if max_original <= 640:
+            max_imgsz = max_original
+            reason = "small_frame"
+        elif max_original <= 1280:
+            max_imgsz = 960
+            reason = "medium_frame"
+        else:
+            max_imgsz = 640
+            reason = "large_frame"
+        
+        # Вычисляем imgsz для crop
+        max_crop = max(crop_h, crop_w)
+        crop_imgsz = int(np.ceil(max_crop / 32) * 32)
+        
+        # Применяем ограничения
+        imgsz = max(128, min(max_imgsz, crop_imgsz))
+        
+        # Детальное логирование
+        logging.info(f"[YOLO_LOGIC] Crop: {crop_w}x{crop_h}, Original: {original_w}x{original_h}")
+        logging.info(f"[YOLO_LOGIC] Max_original: {max_original}, Max_imgsz: {max_imgsz} ({reason})")
+        logging.info(f"[YOLO_LOGIC] Crop_imgsz: {crop_imgsz}, Final_imgsz: {imgsz}")
+        
+        return imgsz
 
 class MultiprocessPersonDetector:
     def __init__(self, num_workers=None):

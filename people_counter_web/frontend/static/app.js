@@ -29,6 +29,11 @@ let roiScale = 1;
 let pendingRoi = null; // Для хранения ROI, если lastImg ещё не загружен
 let roiReceivedFromBackend = false; // Новый флаг
 
+// Video management variables
+let currentSource = 'camera'; // 'camera' or 'video'
+let videoList = [];
+let currentVideo = null;
+
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
   statusDiv.style.color = error ? 'red' : 'green';
@@ -164,11 +169,28 @@ function updateFit() {
 window.addEventListener('resize', updateFit);
 
 function connectWS() {
-  if (!wsUrl) return;
-  if (ws) ws.close();
+  const user = document.getElementById('user').value;
+  const password = document.getElementById('password').value;
+  const host = document.getElementById('host').value;
+  
+  if (currentSource === 'camera' && (!user || !password || !host)) {
+    setStatus('Заполните все поля для камеры', true);
+    return;
+  }
+  
+  if (currentSource === 'video' && !currentVideo) {
+    setStatus('Выберите видео для запуска', true);
+    return;
+  }
+  
+  // Для видео используем фиктивные параметры, так как RTSP URL формируется на backend
+  const wsUrl = currentSource === 'video' 
+    ? `ws://${window.location.host}/ws?user=dummy&password=dummy&host=dummy`
+    : `ws://${window.location.host}/ws?user=${user}&password=${password}&host=${host}`;
+  
+  setStatus('Подключение...', false);
   ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
-  setStatus('Подключение...', false);
   lastStats.status = 'Подключение...';
   roiReceivedFromBackend = false; // Сброс при новом подключении
   ws.onopen = () => {
@@ -242,10 +264,6 @@ function connectWS() {
 
 startBtn.onclick = () => {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
-  const user = document.getElementById('user').value;
-  const password = document.getElementById('password').value;
-  const host = document.getElementById('host').value;
-  wsUrl = `ws://${window.location.hostname}:8000/ws?user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}&host=${encodeURIComponent(host)}`;
   connectWS();
 };
 
@@ -342,4 +360,154 @@ window.addEventListener('DOMContentLoaded', () => {
   userInput.addEventListener('input', e => localStorage.setItem('pc_user', userInput.value));
   passwordInput.addEventListener('input', e => localStorage.setItem('pc_password', passwordInput.value));
   hostInput.addEventListener('input', e => localStorage.setItem('pc_host', hostInput.value));
-}); 
+  
+  // Video controls event handlers
+  const cameraSource = document.getElementById('camera-source');
+  const videoSource = document.getElementById('video-source');
+  const uploadBtn = document.getElementById('upload-btn');
+  const startVideoBtn = document.getElementById('start-video-btn');
+  const stopVideoBtn = document.getElementById('stop-video-btn');
+  
+  cameraSource.addEventListener('change', () => {
+    currentSource = 'camera';
+    updateSourceControls();
+  });
+  
+  videoSource.addEventListener('change', () => {
+    currentSource = 'video';
+    updateSourceControls();
+    loadVideoList();
+  });
+  
+  uploadBtn.addEventListener('click', uploadVideo);
+  startVideoBtn.addEventListener('click', startVideo);
+  stopVideoBtn.addEventListener('click', stopVideo);
+  
+  // Initialize source controls
+  updateSourceControls();
+});
+
+// Video management functions
+async function loadVideoList() {
+  try {
+    const response = await fetch('/api/videos');
+    const data = await response.json();
+    videoList = data.videos || [];
+    updateVideoSelect();
+  } catch (error) {
+    console.error('Failed to load video list:', error);
+  }
+}
+
+function updateVideoSelect() {
+  const select = document.getElementById('video-select');
+  select.innerHTML = '<option value="">Выберите видео...</option>';
+  videoList.forEach(video => {
+    const option = document.createElement('option');
+    option.value = video;
+    option.textContent = video;
+    select.appendChild(option);
+  });
+}
+
+async function uploadVideo() {
+  const fileInput = document.getElementById('video-file');
+  const file = fileInput.files[0];
+  if (!file) {
+    alert('Выберите файл для загрузки');
+    return;
+  }
+  
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  try {
+    setStatus('Загрузка видео...', false);
+    const response = await fetch('/api/videos/upload', {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      setStatus(`Видео загружено: ${result.filename}`, false);
+      await loadVideoList();
+      fileInput.value = '';
+    } else {
+      const error = await response.json();
+      setStatus(`Ошибка загрузки: ${error.detail}`, true);
+    }
+  } catch (error) {
+    setStatus('Ошибка загрузки видео', true);
+    console.error('Upload error:', error);
+  }
+}
+
+async function startVideo() {
+  const select = document.getElementById('video-select');
+  const videoFile = select.value;
+  if (!videoFile) {
+    alert('Выберите видео для запуска');
+    return;
+  }
+  
+  try {
+    setStatus('Запуск видео...', false);
+    const response = await fetch(`/api/videos/start?video_filename=${encodeURIComponent(videoFile)}`, {
+      method: 'POST'
+    });
+    
+    if (response.ok) {
+      const result = await response.json();
+      setStatus(`Видео запущено: ${videoFile}`, false);
+      currentVideo = videoFile;
+      // Если поток уже запущен, перезапускаем его
+      if (ws && ws.readyState === 1) {
+        ws.close();
+        setTimeout(connectWS, 1000);
+      }
+    } else {
+      const error = await response.json();
+      setStatus(`Ошибка запуска: ${error.detail}`, true);
+    }
+  } catch (error) {
+    setStatus('Ошибка запуска видео', true);
+    console.error('Start video error:', error);
+  }
+}
+
+async function stopVideo() {
+  try {
+    const response = await fetch('/api/videos/stop', {
+      method: 'POST'
+    });
+    
+    if (response.ok) {
+      setStatus('Видео остановлено', false);
+      currentVideo = null;
+      // Если поток запущен, перезапускаем его для камеры
+      if (ws && ws.readyState === 1) {
+        ws.close();
+        setTimeout(connectWS, 1000);
+      }
+    } else {
+      setStatus('Ошибка остановки видео', true);
+    }
+  } catch (error) {
+    setStatus('Ошибка остановки видео', true);
+    console.error('Stop video error:', error);
+  }
+}
+
+function updateSourceControls() {
+  const cameraControls = document.getElementById('camera-controls');
+  const videoControls = document.getElementById('video-controls');
+  
+  if (currentSource === 'camera') {
+    cameraControls.style.display = 'block';
+    videoControls.style.display = 'none';
+  } else {
+    cameraControls.style.display = 'none';
+    videoControls.style.display = 'block';
+  }
+} 

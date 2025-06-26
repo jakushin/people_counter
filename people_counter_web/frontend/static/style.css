@@ -5,9 +5,84 @@ body { background: #181818; color: #eee; font-family: sans-serif; }
   margin: 10px 0;
   position: relative;
   z-index: 100;
+  background: rgba(0, 0, 0, 0.8);
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #444;
 }
 #controls label { margin-right: 10px; }
 #status { margin-top: 10px; font-weight: bold; }
+
+/* Source selector styles */
+#source-selector {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 5px;
+}
+#source-selector h3 {
+  margin: 0 0 10px 0;
+  color: #00bfff;
+}
+.source-option {
+  margin: 5px 0;
+}
+.source-option input[type="radio"] {
+  margin-right: 8px;
+}
+.source-option label {
+  cursor: pointer;
+}
+
+/* Camera controls */
+#camera-controls {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: rgba(0, 255, 0, 0.05);
+  border-radius: 5px;
+  border-left: 3px solid #00ff00;
+}
+
+/* Video controls */
+#video-controls {
+  margin-bottom: 15px;
+  padding: 10px;
+  background: rgba(255, 165, 0, 0.05);
+  border-radius: 5px;
+  border-left: 3px solid #ffa500;
+}
+#video-list, #video-upload, #video-controls-buttons {
+  margin: 10px 0;
+}
+#video-select {
+  width: 100%;
+  padding: 5px;
+  background: #333;
+  color: #eee;
+  border: 1px solid #555;
+  border-radius: 3px;
+}
+#video-file {
+  margin: 5px 0;
+}
+#upload-btn, #start-video-btn, #stop-video-btn {
+  background: #ffa500;
+  color: #000;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin: 2px;
+}
+#upload-btn:hover, #start-video-btn:hover, #stop-video-btn:hover {
+  background: #ffb733;
+}
+#stop-video-btn {
+  background: #ff4444;
+}
+#stop-video-btn:hover {
+  background: #ff6666;
+}
 
 /* ROI Polygon styles (Axis-like) */
 #roi-svg {
