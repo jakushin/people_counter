@@ -324,4 +324,19 @@ roiSvg.addEventListener('contextmenu', function(e) {
       sendRoi();
     }
   }
+});
+
+// --- Автозаполнение и автосохранение user/password/host через localStorage ---
+window.addEventListener('DOMContentLoaded', () => {
+  const userInput = document.getElementById('user');
+  const passwordInput = document.getElementById('password');
+  const hostInput = document.getElementById('host');
+  // Подставить значения из localStorage
+  if (localStorage.getItem('pc_user')) userInput.value = localStorage.getItem('pc_user');
+  if (localStorage.getItem('pc_password')) passwordInput.value = localStorage.getItem('pc_password');
+  if (localStorage.getItem('pc_host')) hostInput.value = localStorage.getItem('pc_host');
+  // Сохранять при изменении
+  userInput.addEventListener('input', e => localStorage.setItem('pc_user', userInput.value));
+  passwordInput.addEventListener('input', e => localStorage.setItem('pc_password', passwordInput.value));
+  hostInput.addEventListener('input', e => localStorage.setItem('pc_host', hostInput.value));
 }); 
