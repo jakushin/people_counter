@@ -2,7 +2,7 @@ import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import HTMLResponse
 from app.video_stream import VideoStream
-from app.detector import PersonDetector
+from app.detector import PersonDetector, MultiprocessPersonDetector
 import cv2
 import asyncio
 import json
@@ -23,6 +23,14 @@ app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
 logging.info(f"[START] CPU count: {multiprocessing.cpu_count()}, psutil.cpu_count(logical=True): {psutil.cpu_count(logical=True)}, psutil.cpu_count(logical=False): {psutil.cpu_count(logical=False)}")
 logging.info(f"[START] Initial CPU usage: {psutil.cpu_percent()}%")
+
+# Форсируем переменные окружения для потоков
+os.environ['OMP_NUM_THREADS'] = str(multiprocessing.cpu_count())
+os.environ['MKL_NUM_THREADS'] = str(multiprocessing.cpu_count())
+os.environ['NUMEXPR_NUM_THREADS'] = str(multiprocessing.cpu_count())
+os.environ['OPENBLAS_NUM_THREADS'] = str(multiprocessing.cpu_count())
+os.environ['VECLIB_MAXIMUM_THREADS'] = str(multiprocessing.cpu_count())
+logging.info(f"[ENV] OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}, MKL_NUM_THREADS={os.environ['MKL_NUM_THREADS']}, NUMEXPR_NUM_THREADS={os.environ['NUMEXPR_NUM_THREADS']}, OPENBLAS_NUM_THREADS={os.environ['OPENBLAS_NUM_THREADS']}, VECLIB_MAXIMUM_THREADS={os.environ['VECLIB_MAXIMUM_THREADS']}")
 
 ROI_FILE = '/data/roi.json'
 
@@ -66,7 +74,8 @@ async def websocket_endpoint(
     last_send_time = time.time()
     try:
         stream = VideoStream(rtsp_url)
-        detector = PersonDetector()
+        #detector = PersonDetector()
+        detector = MultiprocessPersonDetector()
         async for frame, stats in stream.async_frames():
             try:
                 roi_changed = False

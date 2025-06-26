@@ -9,6 +9,8 @@ import multiprocessing
 import time
 import threading
 import psutil
+from multiprocessing import Process, Queue, cpu_count
+import queue as pyqueue
 
 @contextlib.contextmanager
 def suppress_all_output():
@@ -64,8 +66,9 @@ class PersonDetector:
             imgsz = max(1280, w, h)
             thread_id = threading.get_ident()
             cpu_percent = psutil.cpu_percent(interval=None)
+            cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
             import torch
-            logging.info(f"[DETECT] Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%")
+            logging.info(f"[DETECT] Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}")
             with suppress_all_output():
                 results = self.model(frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
@@ -97,4 +100,53 @@ class PersonDetector:
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
             print(f"[ERROR] Detection error: {e}")
-            return b'' 
+            return b''
+
+class MultiprocessPersonDetector:
+    def __init__(self, num_workers=None):
+        self.num_workers = num_workers or cpu_count()
+        self.input_queue = Queue(maxsize=8*self.num_workers)
+        self.output_queue = Queue(maxsize=8*self.num_workers)
+        self.workers = []
+        self.frame_idx = 0
+        self.next_send_idx = 0
+        for i in range(self.num_workers):
+            p = Process(target=self.worker, args=(self.input_queue, self.output_queue))
+            p.daemon = True
+            p.start()
+            self.workers.append(p)
+        self.result_buffer = {}
+
+    @staticmethod
+    def worker(input_queue, output_queue):
+        # В каждом процессе своя модель
+        detector = PersonDetector()
+        while True:
+            try:
+                idx, frame, roi = input_queue.get(timeout=1)
+            except pyqueue.Empty:
+                continue
+            try:
+                result = detector.detect(frame, roi=roi)
+                output_queue.put((idx, result))
+            except Exception as e:
+                logging.error(f"[MP_WORKER] Error: {e}")
+                output_queue.put((idx, b''))
+
+    def detect(self, frame, roi=None):
+        idx = self.frame_idx
+        self.frame_idx += 1
+        self.input_queue.put((idx, frame, roi))
+        # Ждём следующий по порядку результат
+        while True:
+            try:
+                out_idx, result = self.output_queue.get(timeout=2)
+                self.result_buffer[out_idx] = result
+                # Отправляем только если готов следующий по порядку
+                if self.next_send_idx in self.result_buffer:
+                    res = self.result_buffer.pop(self.next_send_idx)
+                    self.next_send_idx += 1
+                    return res
+            except pyqueue.Empty:
+                logging.warning("[MP_DETECTOR] Timeout waiting for result")
+                return b'' 
