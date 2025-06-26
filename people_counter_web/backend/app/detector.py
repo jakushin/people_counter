@@ -41,6 +41,7 @@ cv2.setLogLevel(0)
 
 class PersonDetector:
     def __init__(self):
+        logging.info(f"[PD_INIT] PersonDetector init in PID: {os.getpid()}, Thread: {threading.get_ident()}")
         # Автоматически определяем число доступных ядер
         try:
             import torch
@@ -65,10 +66,11 @@ class PersonDetector:
             h, w = frame.shape[:2]
             imgsz = max(1280, w, h)
             thread_id = threading.get_ident()
+            pid = os.getpid()
             cpu_percent = psutil.cpu_percent(interval=None)
             cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
             import torch
-            logging.info(f"[DETECT] Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}")
+            logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}")
             with suppress_all_output():
                 results = self.model(frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
@@ -110,16 +112,21 @@ class MultiprocessPersonDetector:
         self.workers = []
         self.frame_idx = 0
         self.next_send_idx = 0
+        logging.info(f"[MP_INIT] Main PID: {os.getpid()}, num_workers: {self.num_workers}")
         for i in range(self.num_workers):
-            p = Process(target=self.worker, args=(self.input_queue, self.output_queue))
-            p.daemon = True
-            p.start()
-            self.workers.append(p)
+            try:
+                p = Process(target=self.worker, args=(self.input_queue, self.output_queue, i))
+                p.daemon = True
+                p.start()
+                self.workers.append(p)
+                logging.info(f"[MP_INIT] Started worker {i}, PID: {p.pid}")
+            except Exception as e:
+                logging.error(f"[MP_INIT] Failed to start worker {i}: {e}")
         self.result_buffer = {}
 
     @staticmethod
-    def worker(input_queue, output_queue):
-        # В каждом процессе своя модель
+    def worker(input_queue, output_queue, worker_idx):
+        logging.info(f"[MP_WORKER] Worker {worker_idx} started, PID: {os.getpid()}")
         detector = PersonDetector()
         while True:
             try:
@@ -136,13 +143,14 @@ class MultiprocessPersonDetector:
     def detect(self, frame, roi=None):
         idx = self.frame_idx
         self.frame_idx += 1
+        pid = os.getpid()
+        thread_id = threading.get_ident()
+        logging.info(f"[DETECT] [MP_DETECTOR] Main PID: {pid}, Thread ID: {thread_id}, sending frame idx: {idx}")
         self.input_queue.put((idx, frame, roi))
-        # Ждём следующий по порядку результат
         while True:
             try:
                 out_idx, result = self.output_queue.get(timeout=2)
                 self.result_buffer[out_idx] = result
-                # Отправляем только если готов следующий по порядку
                 if self.next_send_idx in self.result_buffer:
                     res = self.result_buffer.pop(self.next_send_idx)
                     self.next_send_idx += 1

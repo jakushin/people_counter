@@ -76,6 +76,7 @@ async def websocket_endpoint(
         stream = VideoStream(rtsp_url)
         #detector = PersonDetector()
         detector = MultiprocessPersonDetector()
+        logging.info(f"[MAIN] Using detector class: {type(detector)}, PID: {os.getpid()}")
         async for frame, stats in stream.async_frames():
             try:
                 roi_changed = False
