@@ -64,7 +64,20 @@ class PersonDetector:
         try:
             t0 = time.time()
             h, w = frame.shape[:2]
-            imgsz = max(1280, w, h)
+            # --- Новый блок: вычисляем bounding box ROI и делаем crop ---
+            crop_offset = (0, 0)
+            crop_frame = frame
+            pts = np.array(roi, dtype=np.int32) if roi and len(roi) >= 3 else None
+            if pts is not None:
+                xs = pts[:, 0]
+                ys = pts[:, 1]
+                x_min, x_max = max(0, xs.min()), min(w, xs.max())
+                y_min, y_max = max(0, ys.min()), min(h, ys.max())
+                crop_frame = frame[y_min:y_max, x_min:x_max]
+                crop_offset = (x_min, y_min)
+            else:
+                x_min, y_min = 0, 0
+            imgsz = max(1280, crop_frame.shape[1], crop_frame.shape[0])
             thread_id = threading.get_ident()
             pid = os.getpid()
             cpu_percent = psutil.cpu_percent(interval=None)
@@ -74,18 +87,22 @@ class PersonDetector:
             import torch
             logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             with suppress_all_output():
-                results = self.model(frame, imgsz=imgsz, conf=0.2)
+                results = self.model(crop_frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
             annotated = frame.copy()
             # Для object detection: рисуем bbox для каждого найденного человека
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()  # (N, 4)
                 clss = results[0].boxes.cls.cpu().numpy()    # (N,)
-                pts = np.array(roi, dtype=np.int32) if roi and len(roi) >= 3 else None
                 for box, cls_id in zip(boxes, clss):
                     if int(cls_id) != 0:
                         continue  # Только люди
+                    # Смещаем bbox обратно в координаты исходного кадра
                     x1, y1, x2, y2 = map(int, box)
+                    x1 += crop_offset[0]
+                    x2 += crop_offset[0]
+                    y1 += crop_offset[1]
+                    y2 += crop_offset[1]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     if pts is not None and cv2.pointPolygonTest(pts, (cx, cy), False) < 0:
                         continue  # Центр bbox вне ROI
