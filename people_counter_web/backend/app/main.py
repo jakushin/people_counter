@@ -11,10 +11,10 @@ import time
 import os
 
 try:
-    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_WARNING)
+    cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
 except AttributeError:
     try:
-        cv2.setLogLevel(cv2.LOG_LEVEL_WARNING)
+        cv2.setLogLevel(cv2.LOG_LEVEL_ERROR)
     except AttributeError:
         pass  # Нет поддержки suppression
 
