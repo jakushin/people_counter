@@ -91,15 +91,6 @@ function drawRoi() {
     circle.setAttribute('class', 'roi-vertex');
     circle.setAttribute('data-idx', i);
     circle.addEventListener('mousedown', e => { draggingVertex = i; e.stopPropagation(); });
-    circle.addEventListener('dblclick', e => {
-      e.stopPropagation();
-      const idx = parseInt(circle.getAttribute('data-idx'));
-      if (roiPoints.length > 3 && idx >= 0 && idx < roiPoints.length) {
-        roiPoints.splice(idx, 1);
-        drawRoi();
-        sendRoi();
-      }
-    });
     roiSvg.appendChild(circle);
   });
   // Средние точки
@@ -320,4 +311,16 @@ resetRoiBtn.onclick = () => {
     drawRoi();
     sendRoi();
   }
-}; 
+};
+
+// Добавляем глобальный обработчик dblclick на roiSvg
+roiSvg.addEventListener('dblclick', function(e) {
+  if (e.target.classList.contains('roi-vertex')) {
+    const idx = parseInt(e.target.getAttribute('data-idx'));
+    if (roiPoints.length > 3 && idx >= 0 && idx < roiPoints.length) {
+      roiPoints.splice(idx, 1);
+      drawRoi();
+      sendRoi();
+    }
+  }
+}); 
