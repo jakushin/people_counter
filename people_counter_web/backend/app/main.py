@@ -60,6 +60,7 @@ async def websocket_endpoint(
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0
+    last_send_time = time.time()
     try:
         stream = VideoStream(rtsp_url)
         detector = PersonDetector()
@@ -78,8 +79,12 @@ async def websocket_endpoint(
                         break
                     except Exception:
                         break
+                t0 = time.time()
                 result = detector.detect(frame, roi=roi)
+                t1 = time.time()
                 now = time.time()
+                logging.info(f'[MAIN] Detect+prep: {t1-t0:.3f}s, Time since last send: {now-last_send_time:.3f}s')
+                last_send_time = now
                 if now - last_stat_time >= 2.0:
                     last_cpu = int(round(psutil.cpu_percent()))
                     last_mem = int(round(psutil.virtual_memory().percent))

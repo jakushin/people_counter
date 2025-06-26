@@ -38,6 +38,7 @@ class VideoStream:
 
     async def async_frames(self):
         retry_delay = 2
+        prev_time = time.time()
         while True:
             if not self.cap or not self.cap.isOpened():
                 logging.warning('RTSP stream lost, reconnecting...')
@@ -50,6 +51,9 @@ class VideoStream:
             with self.suppress_stderr():
                 ret, frame = self.cap.read()
             now = time.time()
+            delta = now - prev_time
+            prev_time = now
+            logging.info(f'[VIDEO_STREAM] Frame received. Delta: {delta:.3f} s')
             if not ret or frame is None:
                 logging.warning('Failed to read frame from RTSP stream, reconnecting...')
                 self.cap.release()
@@ -63,9 +67,10 @@ class VideoStream:
                 self.fps = self.frame_count / (now - self.last_stat_time)
                 self.frame_count = 0
                 self.last_stat_time = now
+                logging.info(f'[VIDEO_STREAM] FPS: {self.fps:.2f}')
             yield frame, {
                 'timestamp': now,
                 'fps': round(self.fps, 2),
                 'shape': frame.shape[:2][::-1]  # (width, height)
             }
-            await asyncio.sleep(0.1)  # ~10 fps 
+            await asyncio.sleep(0.01)  # уменьшено для теста максимального FPS 

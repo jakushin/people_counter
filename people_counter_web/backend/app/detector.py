@@ -6,6 +6,7 @@ import sys
 import contextlib
 import os
 import multiprocessing
+import time
 
 @contextlib.contextmanager
 def suppress_all_output():
@@ -55,10 +56,12 @@ class PersonDetector:
 
     def detect(self, frame, roi=None):
         try:
+            t0 = time.time()
             h, w = frame.shape[:2]
             imgsz = max(1280, w, h)
             with suppress_all_output():
                 results = self.model(frame, imgsz=imgsz, conf=0.2)
+            t1 = time.time()
             annotated = frame.copy()
             # Для object detection: рисуем bbox для каждого найденного человека
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
@@ -73,12 +76,16 @@ class PersonDetector:
                     if pts is not None and cv2.pointPolygonTest(pts, (cx, cy), False) < 0:
                         continue  # Центр bbox вне ROI
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
+            t2 = time.time()
             # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
                 pts = np.array(roi, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
+            t3 = time.time()
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
             _, jpeg = cv2.imencode('.jpg', annotated, encode_param)
+            t4 = time.time()
+            logging.info(f'[DETECTOR] Inference: {t1-t0:.3f}s, Draw: {t2-t1:.3f}s, JPEG: {t3-t2:.3f}s')
             return jpeg.tobytes()
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
