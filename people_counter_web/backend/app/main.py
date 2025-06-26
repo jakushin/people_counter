@@ -93,7 +93,7 @@ async def websocket_endpoint(
                     except Exception:
                         break
                 t0 = time.time()
-                result = detector.detect(frame, roi=roi)
+                result, crop_h, crop_w, imgsz = detector.detect(frame, roi=roi)
                 t1 = time.time()
                 now = time.time()
                 logging.info(f'[MAIN] Detect+prep: {t1-t0:.3f}s, Time since last send: {now-last_send_time:.3f}s')
@@ -108,7 +108,10 @@ async def websocket_endpoint(
                     'shape': stats['shape'],
                     'cpu': last_cpu,
                     'mem': last_mem,
-                    'status': 'ok'
+                    'status': 'ok',
+                    'crop_h': crop_h,
+                    'crop_w': crop_w,
+                    'imgsz': imgsz
                 }))
                 await websocket.send_bytes(result)
             except Exception as e:

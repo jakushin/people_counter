@@ -64,7 +64,6 @@ class PersonDetector:
         try:
             t0 = time.time()
             h, w = frame.shape[:2]
-            # --- Новый блок: вычисляем bounding box ROI и делаем crop ---
             crop_offset = (0, 0)
             crop_frame = frame
             pts = np.array(roi, dtype=np.int32) if roi and len(roi) >= 3 else None
@@ -73,19 +72,19 @@ class PersonDetector:
                 ys = pts[:, 1]
                 x_min, x_max = max(0, xs.min()), min(w, xs.max())
                 y_min, y_max = max(0, ys.min()), min(h, ys.max())
-                # Проверяем, что crop не пустой
                 if x_max > x_min and y_max > y_min:
                     crop_frame = frame[y_min:y_max, x_min:x_max]
                     crop_offset = (x_min, y_min)
                     logging.info(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
                 else:
                     logging.warning(f"[CROP] Invalid crop dimensions: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
-                    # Возвращаем пустой кадр с заглушкой
-                    return self._create_empty_frame(frame.shape[:2])
+                    return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
             else:
                 logging.info(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
                 x_min, y_min = 0, 0
-            imgsz = max(1280, crop_frame.shape[1], crop_frame.shape[0])
+            crop_h, crop_w = crop_frame.shape[:2]
+            imgsz = max(128, min(640, int(np.ceil(max(crop_h, crop_w) / 32) * 32)))
+            logging.info(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
             thread_id = threading.get_ident()
             pid = os.getpid()
             cpu_percent = psutil.cpu_percent(interval=None)
@@ -98,16 +97,14 @@ class PersonDetector:
                 results = self.model(crop_frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
             annotated = frame.copy()
-            # Для object detection: рисуем bbox для каждого найденного человека
             person_count = 0
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
-                boxes = results[0].boxes.xyxy.cpu().numpy()  # (N, 4)
-                clss = results[0].boxes.cls.cpu().numpy()    # (N,)
+                boxes = results[0].boxes.xyxy.cpu().numpy()
+                clss = results[0].boxes.cls.cpu().numpy()
                 logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}")
                 for box, cls_id in zip(boxes, clss):
                     if int(cls_id) != 0:
-                        continue  # Только люди
-                    # Смещаем bbox обратно в координаты исходного кадра
+                        continue
                     x1, y1, x2, y2 = map(int, box)
                     x1 += crop_offset[0]
                     x2 += crop_offset[0]
@@ -116,14 +113,13 @@ class PersonDetector:
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
                     if pts is not None and cv2.pointPolygonTest(pts, (float(cx), float(cy)), False) < 0:
                         logging.info(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
-                        continue  # Центр bbox вне ROI
+                        continue
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
                     person_count += 1
                     logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), center=({cx},{cy})")
             else:
                 logging.info(f"[DETECT] No objects detected in crop")
             t2 = time.time()
-            # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
                 pts = np.array(roi, dtype=np.int32)
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
@@ -132,16 +128,15 @@ class PersonDetector:
             success, jpeg = cv2.imencode('.jpg', annotated, encode_param)
             if not success or jpeg is None or len(jpeg) == 0:
                 logging.error(f"[JPEG] Failed to encode image: success={success}, jpeg_size={len(jpeg) if jpeg is not None else 'None'}")
-                return self._create_empty_frame(frame.shape[:2])
+                return self._create_empty_frame(frame.shape[:2]), crop_h, crop_w, imgsz
             t4 = time.time()
             logging.info(f'[DETECTOR] Inference: {t1-t0:.3f}s, Draw: {t2-t1:.3f}s, JPEG: {t3-t2:.3f}s')
-            return jpeg.tobytes()
+            return jpeg.tobytes(), crop_h, crop_w, imgsz
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
             print(f"[ERROR] Detection error: {e}")
-            # Логируем дополнительную информацию для диагностики
             logging.error(f"[ERROR_DETAILS] Frame shape: {frame.shape}, ROI: {roi}, Crop offset: {crop_offset}")
-            return self._create_empty_frame(frame.shape[:2])
+            return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
     def _create_empty_frame(self, shape):
         """Создаёт пустой кадр-заглушку при ошибках"""
@@ -213,19 +208,15 @@ class MultiprocessPersonDetector:
         pid = os.getpid()
         thread_id = threading.get_ident()
         logging.info(f"[DETECT] [MP_DETECTOR] Main PID: {pid}, Thread ID: {thread_id}, sending frame idx: {idx}")
-        
-        # Проверяем состояние очередей
         input_size = self.input_queue.qsize()
         output_size = self.output_queue.qsize()
         buffer_size = len(self.result_buffer)
         logging.info(f"[MP_QUEUE] Input queue: {input_size}, Output queue: {output_size}, Buffer: {buffer_size}")
-        
         try:
             self.input_queue.put((idx, frame, roi), timeout=1)
         except pyqueue.Full:
             logging.error(f"[MP_QUEUE] Input queue full, dropping frame {idx}")
-            return self._create_empty_frame(frame.shape[:2])
-        
+            return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
         while True:
             try:
                 out_idx, result = self.output_queue.get(timeout=2)
@@ -234,14 +225,13 @@ class MultiprocessPersonDetector:
                 if self.next_send_idx in self.result_buffer:
                     res = self.result_buffer.pop(self.next_send_idx)
                     self.next_send_idx += 1
-                    logging.info(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res)}")
-                    return res
+                    logging.info(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res) if isinstance(res, bytes) else 'tuple'}")
+                    return res if isinstance(res, tuple) else (res, 0, 0, 0)
             except pyqueue.Empty:
                 logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")
-                # Проверяем состояние воркеров
                 active_workers = sum(1 for w in self.workers if w.is_alive())
                 logging.warning(f"[MP_WORKERS] Active workers: {active_workers}/{len(self.workers)}")
-                return self._create_empty_frame(frame.shape[:2])
+                return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
     def _create_empty_frame(self, shape):
         """Создаёт пустой кадр-заглушку при ошибках"""

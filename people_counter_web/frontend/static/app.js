@@ -41,7 +41,7 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 95);
+  ctx.fillRect(w-180, 0, 180, 130);
   ctx.globalAlpha = 1.0;
   ctx.fillStyle = '#0f0';
   ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
@@ -51,6 +51,9 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, 52);
   ctx.fillText('CPU: ' + (stats.cpu !== null ? stats.cpu + '%' : '-'), w-10, 67);
   ctx.fillText('MEM: ' + (stats.mem !== null ? stats.mem + '%' : '-'), w-10, 82);
+  ctx.fillStyle = '#ff0';
+  ctx.fillText('crop: ' + (stats.crop_w ?? '-') + 'x' + (stats.crop_h ?? '-'), w-10, 97);
+  ctx.fillText('imgsz: ' + (stats.imgsz ?? '-'), w-10, 112);
   ctx.restore();
 }
 
