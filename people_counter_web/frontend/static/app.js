@@ -46,7 +46,7 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 130);
+  ctx.fillRect(w-180, 0, 180, 150); // Увеличиваем высоту для видео информации
   ctx.globalAlpha = 1.0;
   ctx.fillStyle = '#0f0';
   ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
@@ -57,8 +57,14 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('CPU: ' + (stats.cpu !== null ? stats.cpu + '%' : '-'), w-10, 67);
   ctx.fillText('MEM: ' + (stats.mem !== null ? stats.mem + '%' : '-'), w-10, 82);
   ctx.fillStyle = '#ff0';
-  ctx.fillText('crop: ' + (stats.crop_w ?? '-') + 'x' + (stats.crop_h ?? '-'), w-10, 97);
-  ctx.fillText('imgsz: ' + (stats.imgsz ?? '-'), w-10, 112);
+  ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, 97);
+  ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, 112);
+  
+  // Добавляем информацию о видео
+  if (currentVideo) {
+    ctx.fillStyle = '#ffa500';
+    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, 127);
+  }
   ctx.restore();
 }
 

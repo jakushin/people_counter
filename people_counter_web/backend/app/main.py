@@ -217,6 +217,8 @@ async def websocket_endpoint(
     # Сразу отправляем ROI клиенту, если оно есть
     if roi:
         await websocket.send_text(json.dumps({"type": "roi", "points": roi}))
+    
+    logging.info(f'[WS] Starting video stream with source: {rtsp_url}')
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0

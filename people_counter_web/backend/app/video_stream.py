@@ -14,6 +14,7 @@ class VideoStream:
         self.fps = 0
         self.frame_count = 0
         self.last_stat_time = time.time()
+        self.is_file = os.path.isfile(rtsp_url)  # Проверяем, это файл или RTSP
         self.connect()
 
     @contextlib.contextmanager
@@ -32,33 +33,54 @@ class VideoStream:
         with self.suppress_stderr():
             self.cap = cv2.VideoCapture(self.rtsp_url)
         if not self.cap or not self.cap.isOpened():
-            logging.error(f'Cannot open RTSP stream: {self.rtsp_url}')
-            raise RuntimeError('Cannot open RTSP stream')
-        logging.info('RTSP stream connected')
+            logging.error(f'Cannot open video source: {self.rtsp_url}')
+            raise RuntimeError('Cannot open video source')
+        
+        if self.is_file:
+            logging.info(f'Video file opened: {self.rtsp_url}')
+        else:
+            logging.info('RTSP stream connected')
 
     async def async_frames(self):
         retry_delay = 2
         prev_time = time.time()
         while True:
             if not self.cap or not self.cap.isOpened():
-                logging.warning('RTSP stream lost, reconnecting...')
+                logging.warning('Video source lost, reconnecting...')
                 await asyncio.sleep(retry_delay)
                 try:
                     self.connect()
                 except Exception as e:
                     logging.error(f'Reconnect failed: {e}')
                     continue
+            
             with self.suppress_stderr():
                 ret, frame = self.cap.read()
+            
+            # Если это файл и достигнут конец, перематываем в начало
+            if self.is_file and not ret:
+                logging.info('End of video file reached, restarting...')
+                self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                with self.suppress_stderr():
+                    ret, frame = self.cap.read()
+            
             now = time.time()
             delta = now - prev_time
             prev_time = now
             logging.info(f'[VIDEO_STREAM] Frame received. Delta: {delta:.3f} s')
+            
             if not ret or frame is None:
-                logging.warning('Failed to read frame from RTSP stream, reconnecting...')
-                self.cap.release()
-                await asyncio.sleep(retry_delay)
-                continue
+                if self.is_file:
+                    logging.warning('Failed to read frame from video file, restarting...')
+                    self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    await asyncio.sleep(0.1)
+                    continue
+                else:
+                    logging.warning('Failed to read frame from RTSP stream, reconnecting...')
+                    self.cap.release()
+                    await asyncio.sleep(retry_delay)
+                    continue
+            
             # FPS calculation
             self.frame_count += 1
             if self.last_stat_time is None:
@@ -68,9 +90,15 @@ class VideoStream:
                 self.frame_count = 0
                 self.last_stat_time = now
                 logging.info(f'[VIDEO_STREAM] FPS: {self.fps:.2f}')
+            
             yield frame, {
                 'timestamp': now,
                 'fps': round(self.fps, 2),
                 'shape': frame.shape[:2][::-1]  # (width, height)
             }
-            await asyncio.sleep(0.01)  # уменьшено для теста максимального FPS 
+            
+            # Для файлов добавляем небольшую задержку для контроля FPS
+            if self.is_file:
+                await asyncio.sleep(0.1)  # 10 FPS для файлов
+            else:
+                await asyncio.sleep(0.01)  # RTSP поток 
