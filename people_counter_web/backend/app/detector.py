@@ -63,8 +63,15 @@ class PersonDetector:
             # Для object detection: рисуем bbox для каждого найденного человека
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()  # (N, 4)
-                for box in boxes:
+                clss = results[0].boxes.cls.cpu().numpy()    # (N,)
+                pts = np.array(roi, dtype=np.int32) if roi and len(roi) >= 3 else None
+                for box, cls_id in zip(boxes, clss):
+                    if int(cls_id) != 0:
+                        continue  # Только люди
                     x1, y1, x2, y2 = map(int, box)
+                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                    if pts is not None and cv2.pointPolygonTest(pts, (cx, cy), False) < 0:
+                        continue  # Центр bbox вне ROI
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
             # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
