@@ -5,6 +5,7 @@ from ultralytics import YOLO
 import sys
 import contextlib
 import os
+import multiprocessing
 
 @contextlib.contextmanager
 def suppress_all_output():
@@ -35,10 +36,19 @@ cv2.setLogLevel(0)
 
 class PersonDetector:
     def __init__(self):
+        # Автоматически определяем число доступных ядер
+        try:
+            import torch
+            num_cores = multiprocessing.cpu_count()
+            torch.set_num_threads(num_cores)
+            torch.set_num_interop_threads(min(2, num_cores))
+            print(f"[INFO] PyTorch num_threads set to {num_cores}")
+        except Exception as e:
+            print(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем pose-модель
-                self.model = YOLO('yolov8n-pose.pt')
+                # Используем yolov8m.pt для детекции людей
+                self.model = YOLO('yolov8m.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise

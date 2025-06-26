@@ -4,6 +4,7 @@ import logging
 import time
 import os
 import sys
+import contextlib
 
 class VideoStream:
     def __init__(self, rtsp_url):
@@ -15,17 +16,21 @@ class VideoStream:
         self.last_stat_time = time.time()
         self.connect()
 
-    def connect(self):
-        if self.cap:
-            self.cap.release()
-        # Подавляем stderr только на время создания VideoCapture
+    @contextlib.contextmanager
+    def suppress_stderr(self):
         old_stderr = sys.stderr
         try:
             sys.stderr = open(os.devnull, 'w')
-            self.cap = cv2.VideoCapture(self.rtsp_url)
+            yield
         finally:
             sys.stderr.close()
             sys.stderr = old_stderr
+
+    def connect(self):
+        if self.cap:
+            self.cap.release()
+        with self.suppress_stderr():
+            self.cap = cv2.VideoCapture(self.rtsp_url)
         if not self.cap or not self.cap.isOpened():
             logging.error(f'Cannot open RTSP stream: {self.rtsp_url}')
             raise RuntimeError('Cannot open RTSP stream')
@@ -42,7 +47,8 @@ class VideoStream:
                 except Exception as e:
                     logging.error(f'Reconnect failed: {e}')
                     continue
-            ret, frame = self.cap.read()
+            with self.suppress_stderr():
+                ret, frame = self.cap.read()
             now = time.time()
             if not ret or frame is None:
                 logging.warning('Failed to read frame from RTSP stream, reconnecting...')
