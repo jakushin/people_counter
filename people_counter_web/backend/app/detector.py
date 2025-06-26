@@ -99,9 +99,11 @@ class PersonDetector:
             t1 = time.time()
             annotated = frame.copy()
             # Для object detection: рисуем bbox для каждого найденного человека
+            person_count = 0
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()  # (N, 4)
                 clss = results[0].boxes.cls.cpu().numpy()    # (N,)
+                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}")
                 for box, cls_id in zip(boxes, clss):
                     if int(cls_id) != 0:
                         continue  # Только люди
@@ -112,9 +114,14 @@ class PersonDetector:
                     y1 += crop_offset[1]
                     y2 += crop_offset[1]
                     cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    if pts is not None and cv2.pointPolygonTest(pts, (cx, cy), False) < 0:
+                    if pts is not None and cv2.pointPolygonTest(pts, (float(cx), float(cy)), False) < 0:
+                        logging.info(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
                         continue  # Центр bbox вне ROI
                     cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
+                    person_count += 1
+                    logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), center=({cx},{cy})")
+            else:
+                logging.info(f"[DETECT] No objects detected in crop")
             t2 = time.time()
             # Нарисовать ROI поверх
             if roi and len(roi) >= 3:
@@ -132,6 +139,8 @@ class PersonDetector:
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
             print(f"[ERROR] Detection error: {e}")
+            # Логируем дополнительную информацию для диагностики
+            logging.error(f"[ERROR_DETAILS] Frame shape: {frame.shape}, ROI: {roi}, Crop offset: {crop_offset}")
             return self._create_empty_frame(frame.shape[:2])
 
     def _create_empty_frame(self, shape):
@@ -204,15 +213,57 @@ class MultiprocessPersonDetector:
         pid = os.getpid()
         thread_id = threading.get_ident()
         logging.info(f"[DETECT] [MP_DETECTOR] Main PID: {pid}, Thread ID: {thread_id}, sending frame idx: {idx}")
-        self.input_queue.put((idx, frame, roi))
+        
+        # Проверяем состояние очередей
+        input_size = self.input_queue.qsize()
+        output_size = self.output_queue.qsize()
+        buffer_size = len(self.result_buffer)
+        logging.info(f"[MP_QUEUE] Input queue: {input_size}, Output queue: {output_size}, Buffer: {buffer_size}")
+        
+        try:
+            self.input_queue.put((idx, frame, roi), timeout=1)
+        except pyqueue.Full:
+            logging.error(f"[MP_QUEUE] Input queue full, dropping frame {idx}")
+            return self._create_empty_frame(frame.shape[:2])
+        
         while True:
             try:
                 out_idx, result = self.output_queue.get(timeout=2)
                 self.result_buffer[out_idx] = result
+                logging.info(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
                 if self.next_send_idx in self.result_buffer:
                     res = self.result_buffer.pop(self.next_send_idx)
                     self.next_send_idx += 1
+                    logging.info(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res)}")
                     return res
             except pyqueue.Empty:
-                logging.warning("[MP_DETECTOR] Timeout waiting for result")
-                return b'' 
+                logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")
+                # Проверяем состояние воркеров
+                active_workers = sum(1 for w in self.workers if w.is_alive())
+                logging.warning(f"[MP_WORKERS] Active workers: {active_workers}/{len(self.workers)}")
+                return self._create_empty_frame(frame.shape[:2])
+
+    def _create_empty_frame(self, shape):
+        """Создаёт пустой кадр-заглушку при ошибках"""
+        try:
+            # Создаём чёрный кадр с текстом "No image"
+            h, w = shape
+            empty_frame = np.zeros((h, w, 3), dtype=np.uint8)
+            # Добавляем текст
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text = "No image"
+            text_size = cv2.getTextSize(text, font, 1, 2)[0]
+            text_x = (w - text_size[0]) // 2
+            text_y = (h + text_size[1]) // 2
+            cv2.putText(empty_frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
+            # Кодируем в JPEG
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+            success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
+            if success:
+                return jpeg.tobytes()
+            else:
+                logging.error("[JPEG] Failed to encode empty frame")
+                return b''
+        except Exception as e:
+            logging.error(f"[EMPTY_FRAME] Error creating empty frame: {e}")
+            return b'' 
