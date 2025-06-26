@@ -313,25 +313,15 @@ resetRoiBtn.onclick = () => {
   }
 };
 
-// Реализуем собственный двойной клик по вершине ROI
-let lastClickTime = 0;
-let lastClickIdx = null;
-roiSvg.addEventListener('click', function(e) {
+// Добавляем обработчик contextmenu для удаления точки по правому клику
+roiSvg.addEventListener('contextmenu', function(e) {
   if (e.target.classList.contains('roi-vertex')) {
+    e.preventDefault();
     const idx = parseInt(e.target.getAttribute('data-idx'));
-    const now = Date.now();
-    if (lastClickIdx === idx && (now - lastClickTime) < 400) {
-      // Двойной клик по одной и той же вершине
-      if (roiPoints.length > 3 && idx >= 0 && idx < roiPoints.length) {
-        roiPoints.splice(idx, 1);
-        drawRoi();
-        sendRoi();
-      }
-      lastClickTime = 0;
-      lastClickIdx = null;
-    } else {
-      lastClickTime = now;
-      lastClickIdx = idx;
+    if (roiPoints.length > 3 && idx >= 0 && idx < roiPoints.length) {
+      roiPoints.splice(idx, 1);
+      drawRoi();
+      sendRoi();
     }
   }
 }); 
