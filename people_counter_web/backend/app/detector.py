@@ -73,9 +73,17 @@ class PersonDetector:
                 ys = pts[:, 1]
                 x_min, x_max = max(0, xs.min()), min(w, xs.max())
                 y_min, y_max = max(0, ys.min()), min(h, ys.max())
-                crop_frame = frame[y_min:y_max, x_min:x_max]
-                crop_offset = (x_min, y_min)
+                # Проверяем, что crop не пустой
+                if x_max > x_min and y_max > y_min:
+                    crop_frame = frame[y_min:y_max, x_min:x_max]
+                    crop_offset = (x_min, y_min)
+                    logging.info(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
+                else:
+                    logging.warning(f"[CROP] Invalid crop dimensions: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
+                    # Возвращаем пустой кадр с заглушкой
+                    return self._create_empty_frame(frame.shape[:2])
             else:
+                logging.info(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
                 x_min, y_min = 0, 0
             imgsz = max(1280, crop_frame.shape[1], crop_frame.shape[0])
             thread_id = threading.get_ident()
@@ -114,13 +122,41 @@ class PersonDetector:
                 cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
             t3 = time.time()
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-            _, jpeg = cv2.imencode('.jpg', annotated, encode_param)
+            success, jpeg = cv2.imencode('.jpg', annotated, encode_param)
+            if not success or jpeg is None or len(jpeg) == 0:
+                logging.error(f"[JPEG] Failed to encode image: success={success}, jpeg_size={len(jpeg) if jpeg is not None else 'None'}")
+                return self._create_empty_frame(frame.shape[:2])
             t4 = time.time()
             logging.info(f'[DETECTOR] Inference: {t1-t0:.3f}s, Draw: {t2-t1:.3f}s, JPEG: {t3-t2:.3f}s')
             return jpeg.tobytes()
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
             print(f"[ERROR] Detection error: {e}")
+            return self._create_empty_frame(frame.shape[:2])
+
+    def _create_empty_frame(self, shape):
+        """Создаёт пустой кадр-заглушку при ошибках"""
+        try:
+            # Создаём чёрный кадр с текстом "No image"
+            h, w = shape
+            empty_frame = np.zeros((h, w, 3), dtype=np.uint8)
+            # Добавляем текст
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text = "No image"
+            text_size = cv2.getTextSize(text, font, 1, 2)[0]
+            text_x = (w - text_size[0]) // 2
+            text_y = (h + text_size[1]) // 2
+            cv2.putText(empty_frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
+            # Кодируем в JPEG
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+            success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
+            if success:
+                return jpeg.tobytes()
+            else:
+                logging.error("[JPEG] Failed to encode empty frame")
+                return b''
+        except Exception as e:
+            logging.error(f"[EMPTY_FRAME] Error creating empty frame: {e}")
             return b''
 
 class MultiprocessPersonDetector:
