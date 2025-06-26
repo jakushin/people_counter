@@ -1,6 +1,7 @@
 import logging
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from app.video_stream import VideoStream
 from app.detector import PersonDetector, MultiprocessPersonDetector
 import cv2
@@ -23,6 +24,15 @@ except AttributeError:
         pass  # Нет поддержки suppression
 
 app = FastAPI()
+
+# Добавляем CORS middleware для работы с frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 logging.basicConfig(filename='app.log', level=logging.INFO)
 logging.info(f"[START] CPU count: {multiprocessing.cpu_count()}, psutil.cpu_count(logical=True): {psutil.cpu_count(logical=True)}, psutil.cpu_count(logical=False): {psutil.cpu_count(logical=False)}")
 logging.info(f"[START] Initial CPU usage: {psutil.cpu_percent()}%")
