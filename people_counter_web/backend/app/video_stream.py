@@ -30,6 +30,7 @@ class VideoStream:
     def connect(self):
         if self.cap:
             self.cap.release()
+        logging.info(f'[VIDEO_STREAM] Attempting to connect to: {self.rtsp_url}')
         with self.suppress_stderr():
             self.cap = cv2.VideoCapture(self.rtsp_url)
         if not self.cap or not self.cap.isOpened():
@@ -38,12 +39,19 @@ class VideoStream:
         
         if self.is_file:
             logging.info(f'Video file opened: {self.rtsp_url}')
+            # Получаем информацию о файле
+            fps = self.cap.get(cv2.CAP_PROP_FPS)
+            frame_count = self.cap.get(cv2.CAP_PROP_FRAME_COUNT)
+            width = self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+            height = self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+            logging.info(f'[VIDEO_STREAM] File info: {width}x{height}, {fps} FPS, {frame_count} frames')
         else:
             logging.info('RTSP stream connected')
 
     async def async_frames(self):
         retry_delay = 2
         prev_time = time.time()
+        logging.info(f'[VIDEO_STREAM] Starting async_frames loop for: {self.rtsp_url}')
         while True:
             if not self.cap or not self.cap.isOpened():
                 logging.warning('Video source lost, reconnecting...')
@@ -67,7 +75,6 @@ class VideoStream:
             now = time.time()
             delta = now - prev_time
             prev_time = now
-            logging.info(f'[VIDEO_STREAM] Frame received. Delta: {delta:.3f} s')
             
             if not ret or frame is None:
                 if self.is_file:
@@ -80,6 +87,8 @@ class VideoStream:
                     self.cap.release()
                     await asyncio.sleep(retry_delay)
                     continue
+            
+            logging.info(f'[VIDEO_STREAM] Frame received. Shape: {frame.shape}, Delta: {delta:.3f} s')
             
             # FPS calculation
             self.frame_count += 1

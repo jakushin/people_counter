@@ -199,72 +199,77 @@ function connectWS() {
   ws.binaryType = 'arraybuffer';
   lastStats.status = 'Подключение...';
   roiReceivedFromBackend = false; // Сброс при новом подключении
-  ws.onopen = () => {
-    setStatus('Поток запущен');
-    lastStats.status = 'Поток запущен';
+  ws.onopen = function(event) {
+    console.log('WebSocket connected');
+    setStatus('Подключено', false);
+    lastStats.status = 'Подключено';
     if (lastImg) {
       drawRoi();
     }
   };
-  ws.onerror = e => {
+  ws.onerror = function(error) {
+    console.error('WebSocket error:', error);
     setStatus('Ошибка WebSocket', true);
-    lastStats.status = 'Ошибка WebSocket';
   };
-  ws.onclose = () => {
-    setStatus('Поток остановлен, переподключение...', true);
-    lastStats.status = 'Переподключение...';
-    reconnectTimeout = setTimeout(connectWS, 3000);
+  ws.onclose = function(event) {
+    console.log('WebSocket closed:', event.code, event.reason);
+    setStatus('Соединение разорвано', true);
+    if (reconnectTimeout) clearTimeout(reconnectTimeout);
+    reconnectTimeout = setTimeout(connectWS, 5000);
   };
-  ws.onmessage = (event) => {
-    if (typeof event.data === 'string') {
+  ws.onmessage = function(event) {
+    if (event.data instanceof ArrayBuffer) {
+      // Это JPEG изображение
+      const blob = new Blob([event.data], { type: 'image/jpeg' });
+      const img = new window.Image();
+      img.onload = function() {
+        lastImg = img;
+        lastImgW = img.width;
+        lastImgH = img.height;
+        // Если есть pendingRoi — применяем его
+        if (pendingRoi) {
+          roiPoints = pendingRoi;
+          pendingRoi = null;
+          roiReceivedFromBackend = true;
+          drawRoi();
+          updateFit();
+        } else if (!roiPoints) {
+          // Ждём ROI от backend 500 мс, если не пришёл — fallback
+          setTimeout(() => {
+            if (!roiPoints && !roiReceivedFromBackend) {
+              roiPoints = getDefaultRoiPoints(img.width, img.height);
+              drawRoi();
+            }
+          }, 500);
+        }
+        updateFit();
+      };
+      img.onerror = function() {
+        setStatus('Ошибка декодирования изображения', true);
+        lastStats.status = 'Ошибка декодирования';
+        if (lastImg) updateFit();
+      };
+      img.src = URL.createObjectURL(blob);
+    } else {
+      // Это JSON статистика
       try {
         const stats = JSON.parse(event.data);
+        console.log('Received stats:', stats);
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
           roiReceivedFromBackend = true;
-          roiPoints = stats.points; // ВСЕГДА применяем ROI от backend
+          roiPoints = stats.points;
           drawRoi();
           updateFit();
-          // Не отправляем ROI обратно на backend
           return;
         }
-        lastStats = {...lastStats, ...stats};
+        lastStats = { ...lastStats, ...stats };
         lastStats.status = 'Поток запущен';
         if (lastImg) updateFit();
-      } catch(e) {}
-      return;
-    }
-    const blob = new Blob([event.data], {type: 'image/jpeg'});
-    const img = new window.Image();
-    img.onload = function() {
-      lastImg = img;
-      lastImgW = img.width;
-      lastImgH = img.height;
-      // Если есть pendingRoi — применяем его
-      if (pendingRoi) {
-        roiPoints = pendingRoi;
-        pendingRoi = null;
-        roiReceivedFromBackend = true;
-        drawRoi();
-        updateFit();
-        // Не отправляем ROI обратно на backend
-      } else if (!roiPoints) {
-        // Ждём ROI от backend 500 мс, если не пришёл — fallback
-        setTimeout(() => {
-          if (!roiPoints && !roiReceivedFromBackend) {
-            roiPoints = getDefaultRoiPoints(img.width, img.height);
-            drawRoi();
-          }
-        }, 500);
+      } catch (e) {
+        console.error('Failed to parse stats:', e);
       }
-      updateFit();
-    };
-    img.onerror = function() {
-      setStatus('Ошибка декодирования изображения', true);
-      lastStats.status = 'Ошибка декодирования';
-      if (lastImg) updateFit();
-    };
-    img.src = URL.createObjectURL(blob);
+    }
   };
 }
 
