@@ -9,6 +9,7 @@ import json
 import psutil
 import time
 import os
+import multiprocessing
 
 try:
     cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
@@ -20,6 +21,8 @@ except AttributeError:
 
 app = FastAPI()
 logging.basicConfig(filename='app.log', level=logging.INFO)
+logging.info(f"[START] CPU count: {multiprocessing.cpu_count()}, psutil.cpu_count(logical=True): {psutil.cpu_count(logical=True)}, psutil.cpu_count(logical=False): {psutil.cpu_count(logical=False)}")
+logging.info(f"[START] Initial CPU usage: {psutil.cpu_percent()}%")
 
 ROI_FILE = '/data/roi.json'
 

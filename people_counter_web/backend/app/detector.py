@@ -7,6 +7,8 @@ import contextlib
 import os
 import multiprocessing
 import time
+import threading
+import psutil
 
 @contextlib.contextmanager
 def suppress_all_output():
@@ -43,9 +45,10 @@ class PersonDetector:
             num_cores = multiprocessing.cpu_count()
             torch.set_num_threads(num_cores)
             torch.set_num_interop_threads(min(2, num_cores))
-            print(f"[INFO] PyTorch num_threads set to {num_cores}")
+            logging.info(f"[INIT] PyTorch num_threads set to {num_cores}")
+            logging.info(f"[INIT] torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}")
         except Exception as e:
-            print(f"[WARN] Could not set PyTorch threads: {e}")
+            logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
                 # Используем yolov8m.pt для детекции людей
@@ -59,6 +62,10 @@ class PersonDetector:
             t0 = time.time()
             h, w = frame.shape[:2]
             imgsz = max(1280, w, h)
+            thread_id = threading.get_ident()
+            cpu_percent = psutil.cpu_percent(interval=None)
+            import torch
+            logging.info(f"[DETECT] Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%")
             with suppress_all_output():
                 results = self.model(frame, imgsz=imgsz, conf=0.2)
             t1 = time.time()
