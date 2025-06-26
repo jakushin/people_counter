@@ -6,7 +6,7 @@ body { background: #181818; color: #eee; font-family: sans-serif; }
 #status { margin-top: 10px; font-weight: bold; }
 
 /* ROI Polygon styles (Axis-like) */
-#roi-svg { z-index: 10; pointer-events: none; }
+#roi-svg { z-index: 10; }
 .roi-polygon {
   fill: rgba(0, 255, 255, 0.18); /* Axis: полупрозрачный голубой */
   stroke: #00bfff; /* Axis: ярко-голубой */
