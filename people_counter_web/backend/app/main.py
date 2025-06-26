@@ -48,7 +48,6 @@ logging.info(f"[ENV] OMP_NUM_THREADS={os.environ['OMP_NUM_THREADS']}, MKL_NUM_TH
 ROI_FILE = '/data/roi.json'
 VIDEOS_DIR = '/videos'
 RTSP_PORT = 8554
-current_video_process = None
 current_video_file = None
 
 def load_roi():
@@ -80,25 +79,15 @@ def get_video_files() -> List[str]:
         return []
 
 def stop_current_video():
-    """Остановить текущий видео процесс"""
-    global current_video_process, current_video_file
-    if current_video_process:
-        try:
-            current_video_process.terminate()
-            current_video_process.wait(timeout=5)
-            logging.info(f'Stopped video process for {current_video_file}')
-        except subprocess.TimeoutExpired:
-            current_video_process.kill()
-            logging.warning(f'Killed video process for {current_video_file}')
-        except Exception as e:
-            logging.error(f'Error stopping video process: {e}')
-        finally:
-            current_video_process = None
-            current_video_file = None
+    """Остановить текущий видео поток"""
+    global current_video_file
+    if current_video_file:
+        logging.info(f'Stopped video: {current_video_file}')
+        current_video_file = None
 
 def start_video_stream(video_filename: str) -> bool:
-    """Запустить видео как RTSP поток"""
-    global current_video_process, current_video_file
+    """Запустить видео как файловый поток"""
+    global current_video_file
     
     # Проверяем доступность ffmpeg
     try:
@@ -120,76 +109,33 @@ def start_video_stream(video_filename: str) -> bool:
         return False
     
     try:
-        # Команда ffmpeg для создания RTSP потока
+        # Простая команда ffmpeg для конвертации в нужный формат
+        output_path = os.path.join(VIDEOS_DIR, f'converted_{video_filename}')
         cmd = [
             'ffmpeg',
-            '-re',  # читать с реальной скоростью
-            '-stream_loop', '-1',  # бесконечный цикл
             '-i', video_path,
             '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
             '-c:v', 'libx264',  # кодек
             '-preset', 'ultrafast',  # быстрый пресет
-            '-tune', 'zerolatency',  # минимальная задержка
-            '-f', 'rtsp',
-            '-rtsp_transport', 'tcp',  # использовать TCP вместо UDP
-            f'rtsp://0.0.0.0:{RTSP_PORT}/test'
+            '-y',  # перезаписать файл если существует
+            output_path
         ]
         
-        logging.info(f'[FFMPEG] Starting command: {" ".join(cmd)}')
+        logging.info(f'[FFMPEG] Converting video: {" ".join(cmd)}')
         
-        current_video_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        current_video_file = video_filename
+        # Конвертируем видео
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            logging.error(f'FFmpeg conversion failed. Return code: {result.returncode}')
+            logging.error(f'FFmpeg stderr: {result.stderr}')
+            return False
         
-        # Дать время ffmpeg запуститься
-        time.sleep(2)
-        
-        if current_video_process.poll() is None:
-            logging.info(f'Started video stream: {video_filename}')
-            return True
-        else:
-            # Получить вывод ошибки
-            stdout, stderr = current_video_process.communicate()
-            logging.error(f'FFmpeg RTSP failed. Return code: {current_video_process.returncode}')
-            logging.error(f'FFmpeg stdout: {stdout.decode()}')
-            logging.error(f'FFmpeg stderr: {stderr.decode()}')
-            
-            # Попробуем HTTP поток как альтернативу
-            logging.info(f'[FFMPEG] Trying HTTP stream as alternative...')
-            http_cmd = [
-                'ffmpeg',
-                '-re',
-                '-stream_loop', '-1',
-                '-i', video_path,
-                '-vf', 'scale=1280:960,fps=10',
-                '-c:v', 'libx264',
-                '-preset', 'ultrafast',
-                '-f', 'mpegts',
-                f'http://0.0.0.0:{RTSP_PORT}/test'
-            ]
-            
-            logging.info(f'[FFMPEG] HTTP command: {" ".join(http_cmd)}')
-            current_video_process = subprocess.Popen(
-                http_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
-            
-            time.sleep(2)
-            if current_video_process.poll() is None:
-                logging.info(f'Started HTTP video stream: {video_filename}')
-                return True
-            else:
-                stdout, stderr = current_video_process.communicate()
-                logging.error(f'FFmpeg HTTP also failed. Return code: {current_video_process.returncode}')
-                logging.error(f'FFmpeg HTTP stderr: {stderr.decode()}')
-                return False
+        logging.info(f'Video converted successfully: {output_path}')
+        current_video_file = f'converted_{video_filename}'
+        return True
             
     except Exception as e:
-        logging.error(f'Error starting video stream: {e}', exc_info=True)
+        logging.error(f'Error converting video: {e}', exc_info=True)
         return False
 
 @app.get("/")
@@ -255,11 +201,13 @@ async def websocket_endpoint(
 ):
     await websocket.accept()
     
-    # Определяем RTSP URL в зависимости от источника
+    # Определяем источник видео
     if current_video_file:
-        # Используем видео как RTSP поток
-        rtsp_url = f"rtsp://localhost:{RTSP_PORT}/test"
-        logging.info(f'[WS] Using video stream: {current_video_file} -> {rtsp_url}')
+        # Используем конвертированное видео как файл
+        video_path = os.path.join(VIDEOS_DIR, current_video_file)
+        logging.info(f'[WS] Using video file: {current_video_file} -> {video_path}')
+        # Передаем путь к файлу вместо RTSP URL
+        rtsp_url = video_path
     else:
         # Используем камеру
         rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
