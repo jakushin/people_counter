@@ -18,6 +18,7 @@ RUN conda create -y -n people python=3.10 && \
     conda activate people && \
     conda install -y -c conda-forge ffmpeg opencv numpy && \
     conda install -y -c pytorch pytorch torchvision cpuonly && \
+    conda install -y -c conda-forge lap && \
     pip install ultralytics fastapi uvicorn psutil && \
     python -c "import cv2, numpy, ultralytics, torch, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__); print('PyTorch', torch.__version__)" && \
     ffmpeg -version | head -1
