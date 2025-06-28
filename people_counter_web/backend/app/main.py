@@ -74,14 +74,21 @@ def get_video_files() -> List[str]:
             os.makedirs(VIDEOS_DIR, exist_ok=True)
         # Показываем только конвертированные файлы и убираем префикс converted_
         files = []
-        for f in os.listdir(VIDEOS_DIR):
+        all_files = os.listdir(VIDEOS_DIR)
+        logging.info(f'[API] All files in directory: {all_files}')
+        
+        for f in all_files:
             if f.startswith('converted_') and f.lower().endswith('.mp4'):
                 # Убираем префикс converted_ для отображения
                 original_name = f[10:]  # убираем 'converted_'
                 files.append(original_name)
-        return sorted(files)
+                logging.info(f'[API] Added video file: {original_name} (from {f})')
+        
+        result = sorted(files)
+        logging.info(f'[API] Final video list: {result}')
+        return result
     except Exception as e:
-        logging.error(f'[API] Failed to get video files: {e}')
+        logging.error(f'[API] Failed to get video files: {e}', exc_info=True)
         return []
 
 def stop_current_video():
@@ -114,26 +121,40 @@ def start_video_stream(video_filename: str) -> bool:
     
     logging.info(f'[API] Looking for converted file: {converted_path}')
     
-    if not os.path.exists(converted_path):
-        logging.error(f'[API] Converted video file not found: {converted_path}')
-        # Проверяем, что есть в папке
-        try:
-            all_files = os.listdir(VIDEOS_DIR)
-            logging.info(f'[API] Files in videos directory: {all_files}')
-        except Exception as e:
-            logging.error(f'[API] Cannot list directory: {e}')
+    # Проверяем, что есть в папке
+    try:
+        all_files = os.listdir(VIDEOS_DIR)
+        logging.info(f'[API] Files in videos directory: {all_files}')
+        
+        # Ищем файл по точному совпадению
+        found_file = None
+        for file in all_files:
+            if file == converted_filename:
+                found_file = file
+                break
+        
+        if found_file is None:
+            logging.error(f'[API] Converted video file not found: {converted_filename}')
+            return False
+            
+        # Используем найденный файл
+        actual_path = os.path.join(VIDEOS_DIR, found_file)
+        logging.info(f'[API] Found file: {actual_path}')
+        
+    except Exception as e:
+        logging.error(f'[API] Cannot list directory: {e}')
         return False
     
-    file_size = os.path.getsize(converted_path)
-    logging.info(f'[API] Converted video file exists: {converted_filename}, size: {file_size} bytes')
+    file_size = os.path.getsize(actual_path)
+    logging.info(f'[API] Converted video file exists: {found_file}, size: {file_size} bytes')
     
     # Проверяем, что файл не пустой
     if file_size == 0:
-        logging.error(f'[API] Converted video file is empty: {converted_path}')
+        logging.error(f'[API] Converted video file is empty: {actual_path}')
         return False
     
-    current_video_file = converted_filename
-    logging.info(f'[API] Video stream started successfully: {converted_filename}')
+    current_video_file = found_file
+    logging.info(f'[API] Video stream started successfully: {found_file}')
     return True
 
 @app.get("/")

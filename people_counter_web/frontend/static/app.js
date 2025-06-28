@@ -446,9 +446,19 @@ async function uploadVideo() {
   const progressFill = document.querySelector('.progress-fill');
   const progressText = document.querySelector('.progress-text');
   
+  console.log('Progress elements:', { progressDiv, progressFill, progressText });
+  
+  if (!progressDiv || !progressFill || !progressText) {
+    console.error('Progress bar elements not found!');
+    setStatus('Ошибка: элементы прогресс-бара не найдены', true);
+    return;
+  }
+  
   progressDiv.style.display = 'block';
   progressFill.style.width = '0%';
   progressText.textContent = 'Загрузка файла...';
+  
+  console.log('Progress bar shown, starting upload...');
   
   try {
     // Симулируем прогресс загрузки
@@ -520,14 +530,19 @@ async function startVideo() {
     return;
   }
   
+  console.log('Starting video:', videoFile);
+  
   try {
     setStatus('Запуск видео...', false);
     const response = await fetch(`/api/videos/start?video_filename=${encodeURIComponent(videoFile)}`, {
       method: 'POST'
     });
     
+    console.log('Start video response:', response.status, response.statusText);
+    
     if (response.ok) {
       const result = await response.json();
+      console.log('Start video result:', result);
       setStatus(`Видео запущено: ${videoFile}`, false);
       currentVideo = videoFile;
       
@@ -544,11 +559,12 @@ async function startVideo() {
       }, 1000);
     } else {
       const error = await response.json();
+      console.error('Start video error:', error);
       setStatus(`Ошибка запуска: ${error.detail}`, true);
     }
   } catch (error) {
+    console.error('Start video exception:', error);
     setStatus('Ошибка запуска видео', true);
-    console.error('Start video error:', error);
   }
 }
 
