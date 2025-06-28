@@ -69,8 +69,8 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8s.pt для детекции людей
-                self.model = YOLO('yolov8s.pt')
+                # Используем yolov8m.pt для детекции людей
+                self.model = YOLO('yolov8m.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
@@ -123,7 +123,7 @@ class PersonDetector:
                 logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             
             with suppress_all_output():
-                results = self.model(crop_frame, imgsz=imgsz, conf=0.7, iou=0.7, verbose=False, max_det=10)
+                results = self.model(crop_frame, imgsz=imgsz, conf=0.5, verbose=False)
             t1 = time.time()
             annotated = frame.copy()
             person_count = 0
@@ -138,14 +138,11 @@ class PersonDetector:
                 # Логируем обнаружение объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
                 
-                # Фильтруем только людей и применяем NMS
-                person_boxes = []
-                person_confs = []
-                
+                # Фильтруем только людей
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
                         # Фильтруем по confidence
-                        if conf < 0.7:  # Минимальный порог confidence
+                        if conf < 0.5:  # Минимальный порог confidence
                             verbose_log(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
                             continue
                         
@@ -165,36 +162,12 @@ class PersonDetector:
                         # Проверяем размер bounding box (отфильтровываем слишком маленькие)
                         width = x2 - x1
                         height = y2 - y1
-                        if width < 20 or height < 40:  # Минимальные размеры для человека
+                        if width < 30 or height < 60:  # Минимальные размеры для человека
                             verbose_log(f"[FILTER] Skipping small bbox: {width}x{height}")
                             continue
                         
-                        person_boxes.append([x1, y1, x2, y2])
-                        person_confs.append(conf)
-                
-                # Применяем NMS для удаления дублирующихся детекций
-                if person_boxes:
-                    person_boxes = np.array(person_boxes)
-                    person_confs = np.array(person_confs)
-                    
-                    # Применяем NMS с более строгими параметрами
-                    indices = cv2.dnn.NMSBoxes(
-                        person_boxes.tolist(), 
-                        person_confs.tolist(), 
-                        score_threshold=0.7,  # Высокий порог confidence
-                        nms_threshold=0.3    # Строгий NMS (было 0.5)
-                    )
-                    
-                    if len(indices) > 0:
-                        indices = indices.flatten()
-                        for idx in indices:
-                            x1, y1, x2, y2 = person_boxes[idx]
-                            conf = person_confs[idx]
-                            detections.append((x1, y1, x2, y2, conf, 0))
-                    else:
-                        verbose_log("[FILTER] NMS removed all detections")
-                else:
-                    verbose_log("[FILTER] No person detections after filtering")
+                        # Добавляем детекцию в список
+                        detections.append((x1, y1, x2, y2, conf, 0))
             else:
                 logging.info("[DETECT] No objects detected in crop")
             
