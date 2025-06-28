@@ -26,6 +26,9 @@ RUN conda create -y -n people python=3.10 && \
 SHELL ["/bin/bash", "-c"]
 
 COPY requirements.txt .
-RUN conda activate people && pip install --no-cache-dir -r requirements.txt
 COPY app ./app
-CMD ["/bin/bash", "-c", "conda activate people && uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning"] 
+
+# Установить дополнительные зависимости из requirements.txt
+RUN source ~/.bashrc && conda activate people && pip install --no-cache-dir -r requirements.txt
+
+CMD ["/bin/bash", "-c", "source ~/.bashrc && conda activate people && uvicorn app.main:app --host 0.0.0.0 --port 8000 --log-level warning"] 
