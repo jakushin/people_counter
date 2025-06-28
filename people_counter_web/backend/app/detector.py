@@ -138,6 +138,10 @@ class PersonDetector:
                 # Логируем обнаружение объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
                 
+                # Фильтруем только людей и применяем NMS
+                person_boxes = []
+                person_confs = []
+                
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
                         # Фильтруем по confidence
@@ -150,24 +154,46 @@ class PersonDetector:
                             verbose_log(f"[FILTER] Skipping bbox with NaN values: {box}")
                             continue
                         
-                        x1, y1, x2, y2 = map(int, box)
-                        
-                        # Добавляем смещение от crop к координатам в оригинальном кадре
-                        x1 += int(crop_offset[0])
-                        x2 += int(crop_offset[0])
-                        y1 += int(crop_offset[1])
-                        y2 += int(crop_offset[1])
-                        
-                        bbox_w, bbox_h = x2 - x1, y2 - y1
-                        
-                        # Фильтрация по размеру
-                        min_size, max_size = 30, 400
-                        if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
-                            verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
-                            continue
-                        
-                        # Добавляем детекцию в список для трекера
-                        detections.append((x1, y1, x2, y2, conf, 0))  # 0 = person class
+                        person_boxes.append(box)
+                        person_confs.append(conf)
+                
+                # Применяем NMS для удаления дублирующихся детекций
+                if len(person_boxes) > 0:
+                    person_boxes = np.array(person_boxes)
+                    person_confs = np.array(person_confs)
+                    
+                    # Используем OpenCV NMS
+                    indices = cv2.dnn.NMSBoxes(
+                        person_boxes.tolist(), 
+                        person_confs.tolist(), 
+                        score_threshold=0.7, 
+                        nms_threshold=0.5
+                    )
+                    
+                    if len(indices) > 0:
+                        indices = indices.flatten()
+                        for idx in indices:
+                            box = person_boxes[idx]
+                            conf = person_confs[idx]
+                            
+                            x1, y1, x2, y2 = map(int, box)
+                            
+                            # Добавляем смещение от crop к координатам в оригинальном кадре
+                            x1 += int(crop_offset[0])
+                            x2 += int(crop_offset[0])
+                            y1 += int(crop_offset[1])
+                            y2 += int(crop_offset[1])
+                            
+                            bbox_w, bbox_h = x2 - x1, y2 - y1
+                            
+                            # Фильтрация по размеру
+                            min_size, max_size = 30, 400
+                            if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
+                                verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
+                                continue
+                            
+                            # Добавляем детекцию в список
+                            detections.append((x1, y1, x2, y2, conf, 0))  # 0 = person class
             else:
                 # Логируем отсутствие объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] No objects detected in crop")
