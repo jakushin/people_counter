@@ -11,7 +11,7 @@ import threading
 import psutil
 from multiprocessing import Process, Queue, cpu_count
 import queue as pyqueue
-from byte_tracker import ByteTrackerWrapper, TrackedPerson
+from app.byte_tracker import ByteTrackerWrapper, TrackedPerson
 
 # Настройка уровней логирования
 DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
