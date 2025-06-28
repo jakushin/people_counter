@@ -146,7 +146,7 @@ class PersonDetector:
                 logging.info(f"[DETECTOR] Worker {worker_idx} YOLO inference completed in {t1-t0:.3f}s")
             
             # Обработка результатов
-            annotated = crop_frame.copy()
+            annotated = frame.copy()
             person_count = 0
             
             if len(results) > 0:
@@ -218,6 +218,12 @@ class PersonDetector:
                             # Конвертируем в int для OpenCV
                             x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
                             
+                            # Добавляем смещение от crop области к координатам
+                            x1 += crop_offset[0]
+                            y1 += crop_offset[1]
+                            x2 += crop_offset[0]
+                            y2 += crop_offset[1]
+                            
                             # Проверяем, находится ли человек внутри ROI
                             is_inside_roi = True
                             if pts is not None:
@@ -235,34 +241,34 @@ class PersonDetector:
                                     for corner in corners
                                 )
                         
-                        # Используем стабильные цвета на основе confidence, а не индекса
-                        if is_inside_roi:
-                            if conf > 0.85:
-                                color = (0, 255, 0)  # Ярко-зеленый для высокого confidence
+                            # Используем стабильные цвета на основе confidence, а не индекса
+                            if is_inside_roi:
+                                if conf > 0.85:
+                                    color = (0, 255, 0)  # Ярко-зеленый для высокого confidence
+                                else:
+                                    color = (0, 200, 0)  # Темно-зеленый для среднего confidence
                             else:
-                                color = (0, 200, 0)  # Темно-зеленый для среднего confidence
-                        else:
-                            if conf > 0.85:
-                                color = (0, 165, 255)  # Оранжевый для высокого confidence
-                            else:
-                                color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
-                        
-                        if worker_idx is not None:
-                            logging.info(f"[DETECTOR] Worker {worker_idx} drawing detection {i}: color={color}, inside_roi={is_inside_roi}")
-                        
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                        
-                        # Добавляем текст с confidence
-                        label = f'Person {i+1} ({conf:.2f})'
-                        if is_inside_roi:
-                            label += ' (ROI)'
-                            person_count += 1
-                        
-                        cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                        
-                        # Логируем детекции
-                        if worker_idx is not None:
-                            logging.info(f"[DETECTOR] Worker {worker_idx} Person {i+1}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
+                                if conf > 0.85:
+                                    color = (0, 165, 255)  # Оранжевый для высокого confidence
+                                else:
+                                    color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
+                            
+                            if worker_idx is not None:
+                                logging.info(f"[DETECTOR] Worker {worker_idx} drawing detection {i}: color={color}, inside_roi={is_inside_roi}")
+                            
+                            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                            
+                            # Добавляем текст с confidence
+                            label = f'Person {i+1} ({conf:.2f})'
+                            if is_inside_roi:
+                                label += ' (ROI)'
+                                person_count += 1
+                            
+                            cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                            
+                            # Логируем детекции
+                            if worker_idx is not None:
+                                logging.info(f"[DETECTOR] Worker {worker_idx} Person {i+1}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
             
             t2 = time.time()
             # Рисуем ROI красными линиями
