@@ -183,7 +183,10 @@ async def upload_video(file: UploadFile = File(...)):
             '-i', tmp_path,
             '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
             '-c:v', 'libx264',  # кодек
-            '-preset', 'ultrafast',  # быстрый пресет
+            '-preset', 'faster',  # более быстрый пресет, но с лучшим сжатием
+            '-crf', '23',  # качество сжатия (18-28 хорошее качество)
+            '-maxrate', '2M',  # максимальный битрейт
+            '-bufsize', '4M',  # размер буфера
             '-y',  # перезаписать файл если существует
             converted_path
         ]
@@ -218,28 +221,36 @@ def start_video(video_filename: str = Query(...)):
     """Запустить видео как RTSP поток"""
     global current_video_file
     
+    logging.info(f'[API] start_video called with: {video_filename}')
+    logging.info(f'[API] current_video_file before: {current_video_file}')
+    
     video_path = os.path.join(VIDEOS_DIR, video_filename)
     if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video file not found")
     
     logging.info(f'[API] Starting video: {video_filename}')
     current_video_file = video_filename
+    logging.info(f'[API] current_video_file after set: {current_video_file}')
     
     if start_video_stream(video_filename):
         logging.info(f'[API] Video started successfully: {video_filename}')
+        logging.info(f'[API] current_video_file after success: {current_video_file}')
         return {"message": f"Video stream started: {video_filename}"}
     else:
         logging.error(f'[API] Failed to start video: {video_filename}')
         current_video_file = None  # Сбрасываем при ошибке
+        logging.info(f'[API] current_video_file after failure: {current_video_file}')
         raise HTTPException(status_code=500, detail="Failed to start video stream")
 
 @app.post("/api/videos/stop")
 def stop_video():
     """Остановить текущий видео поток"""
     global current_video_file
+    logging.info(f'[API] stop_video called, current_video_file: {current_video_file}')
     if current_video_file:
         logging.info(f'[API] Stopping video: {current_video_file}')
         current_video_file = None
+        logging.info(f'[API] current_video_file after stop: {current_video_file}')
         return {"message": "Video stream stopped"}
     else:
         logging.info('[API] No video to stop')
@@ -259,6 +270,7 @@ async def websocket_endpoint(
 ):
     await websocket.accept()
     logging.info(f'[WS] WebSocket connection accepted. User: {user}, Host: {host}')
+    logging.info(f'[WS] current_video_file at connection start: {current_video_file}')
     
     # Определяем источник видео
     if current_video_file:
