@@ -143,13 +143,25 @@ class PersonDetector:
                             verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
                             continue
                         
-                        # Проверка ROI
+                        # Проверка ROI - проверяем все 4 угла bounding box
                         if pts is not None:
-                            # Конвертируем координаты в правильный формат для OpenCV
-                            cx_int = int(cx)
-                            cy_int = int(cy)
-                            if not cv2.pointPolygonTest(pts, (cx_int, cy_int), False) >= 0:
-                                verbose_log(f"[ROI] Person center ({cx_int}, {cy_int}) outside ROI, skipping")
+                            # Проверяем все 4 угла bounding box
+                            corners = [
+                                (int(x1), int(y1)),  # левый верхний
+                                (int(x2), int(y1)),  # правый верхний  
+                                (int(x2), int(y2)),  # правый нижний
+                                (int(x1), int(y2))   # левый нижний
+                            ]
+                            
+                            # Проверяем, что все углы находятся внутри ROI
+                            all_inside = True
+                            for corner_x, corner_y in corners:
+                                if cv2.pointPolygonTest(pts, (corner_x, corner_y), False) < 0:
+                                    all_inside = False
+                                    break
+                            
+                            if not all_inside:
+                                verbose_log(f"[ROI] Person not fully inside ROI, skipping (corners: {corners})")
                                 continue
                         
                         person_count += 1
