@@ -125,6 +125,13 @@ class PersonDetector:
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
                         x1, y1, x2, y2 = map(int, box)
+                        
+                        # Добавляем смещение от crop к координатам в оригинальном кадре
+                        x1 += crop_offset[0]
+                        x2 += crop_offset[0]
+                        y1 += crop_offset[1]
+                        y2 += crop_offset[1]
+                        
                         bbox_w, bbox_h = x2 - x1, y2 - y1
                         cx, cy = x1 + bbox_w // 2, y1 + bbox_h // 2
                         

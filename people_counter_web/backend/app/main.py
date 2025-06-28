@@ -375,6 +375,34 @@ async def websocket_endpoint(
                 
                 # Отправляем кадр клиенту
                 try:
+                    # Проверяем состояние перед отправкой
+                    if websocket.client_state.value != 1:
+                        logging.warning(f'[WS] WebSocket disconnected before send, state: {websocket.client_state.value}')
+                        break
+                    
+                    # Отправляем метаданные для диагностики
+                    metadata = {
+                        'timestamp': stats['timestamp'],
+                        'fps': stats['fps'],
+                        'shape': stats['shape'],
+                        'cpu': last_cpu,
+                        'mem': last_mem,
+                        'status': 'ok',
+                        'crop_h': crop_h,
+                        'crop_w': crop_w,
+                        'imgsz': imgsz,
+                        'frame_count': frame_count,
+                        'source_type': source_type,
+                        'detect_time': round(detect_time, 3)
+                    }
+                    await websocket.send_text(json.dumps(metadata))
+                    
+                    # Проверяем состояние перед отправкой изображения
+                    if websocket.client_state.value != 1:
+                        logging.warning(f'[WS] WebSocket disconnected before image send, state: {websocket.client_state.value}')
+                        break
+                    
+                    # Отправляем изображение
                     await websocket.send_bytes(result)
                     
                     # Логируем только каждые 200 кадров
