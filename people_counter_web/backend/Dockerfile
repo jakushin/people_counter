@@ -14,17 +14,16 @@ RUN apt-get update && apt-get install -y \
 # Создать новое окружение с python=3.10
 RUN conda create -y -n people python=3.10
 
-# Инициализировать conda для bash
-RUN conda init bash
-
-# Использовать bash как shell для активации окружения
-SHELL ["/bin/bash", "-c"]
-
-# Установить зависимости в окружение
-RUN conda activate people && \
+# Инициализировать conda и установить зависимости в одном блоке
+RUN conda init bash && \
+    . ~/.bashrc && \
+    conda activate people && \
     conda install -y -c conda-forge ffmpeg opencv numpy && \
     conda install -y -c pytorch pytorch torchvision cpuonly && \
     pip install ultralytics fastapi uvicorn psutil
+
+# Использовать bash как shell для активации окружения
+SHELL ["/bin/bash", "-c"]
 
 # Вывести версии основных библиотек
 RUN conda activate people && \
