@@ -65,6 +65,7 @@ class VideoStream:
     async def async_frames(self):
         retry_delay = 2
         prev_time = time.time()
+        frame_times = []  # Для диагностики рывков
         logging.info(f'[VIDEO_STREAM] Starting async_frames loop for: {self.rtsp_url}')
         while True:
             if not self.cap or not self.cap.isOpened():
@@ -76,8 +77,10 @@ class VideoStream:
                     logging.error(f'Reconnect failed: {e}')
                     continue
             
+            frame_start_time = time.time()
             with self.suppress_stderr():
                 ret, frame = self.cap.read()
+            frame_read_time = time.time()
             
             # Если это файл и достигнут конец, перематываем в начало
             if self.is_file and not ret:
@@ -102,7 +105,17 @@ class VideoStream:
                     await asyncio.sleep(retry_delay)
                     continue
             
-            logging.info(f'[VIDEO_STREAM] Frame received. Shape: {frame.shape}, Delta: {delta:.3f} s')
+            # Диагностика времени кадров
+            frame_times.append(delta)
+            if len(frame_times) > 30:  # Анализируем последние 30 кадров
+                frame_times.pop(0)
+                avg_delta = sum(frame_times) / len(frame_times)
+                min_delta = min(frame_times)
+                max_delta = max(frame_times)
+                if max_delta > avg_delta * 2:  # Если есть рывки
+                    logging.warning(f'[VIDEO_STREAM] Frame timing issue: avg={avg_delta:.3f}s, min={min_delta:.3f}s, max={max_delta:.3f}s')
+            
+            logging.info(f'[VIDEO_STREAM] Frame received. Shape: {frame.shape}, Delta: {delta:.3f}s, Read time: {(frame_read_time - frame_start_time)*1000:.1f}ms')
             
             # FPS calculation
             self.frame_count += 1

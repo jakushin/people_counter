@@ -86,57 +86,33 @@ def stop_current_video():
         current_video_file = None
 
 def start_video_stream(video_filename: str) -> bool:
-    """Запустить видео как файловый поток"""
+    """Проверить и запустить видео файл"""
     global current_video_file
     
     # Проверяем доступность ffmpeg
     try:
         result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
         if result.returncode != 0:
-            logging.error(f'FFmpeg not available: {result.stderr}')
+            logging.error(f'[API] FFmpeg not available: {result.stderr}')
             return False
-        logging.info(f'FFmpeg version: {result.stdout.split()[2]}')
+        logging.info(f'[API] FFmpeg version: {result.stdout.split()[2]}')
     except Exception as e:
-        logging.error(f'FFmpeg check failed: {e}')
+        logging.error(f'[API] FFmpeg check failed: {e}')
         return False
     
-    # Остановить предыдущий процесс
-    stop_current_video()
+    # Проверяем существование конвертированного файла
+    converted_filename = f"converted_{video_filename}"
+    converted_path = os.path.join(VIDEOS_DIR, converted_filename)
     
-    video_path = os.path.join(VIDEOS_DIR, video_filename)
-    if not os.path.exists(video_path):
-        logging.error(f'Video file not found: {video_path}')
+    if not os.path.exists(converted_path):
+        logging.error(f'[API] Converted video file not found: {converted_path}')
         return False
     
-    try:
-        # Простая команда ffmpeg для конвертации в нужный формат
-        output_path = os.path.join(VIDEOS_DIR, f'converted_{video_filename}')
-        cmd = [
-            'ffmpeg',
-            '-i', video_path,
-            '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
-            '-c:v', 'libx264',  # кодек
-            '-preset', 'ultrafast',  # быстрый пресет
-            '-y',  # перезаписать файл если существует
-            output_path
-        ]
-        
-        logging.info(f'[FFMPEG] Converting video: {" ".join(cmd)}')
-        
-        # Конвертируем видео
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            logging.error(f'FFmpeg conversion failed. Return code: {result.returncode}')
-            logging.error(f'FFmpeg stderr: {result.stderr}')
-            return False
-        
-        logging.info(f'Video converted successfully: {output_path}')
-        current_video_file = f'converted_{video_filename}'
-        return True
-            
-    except Exception as e:
-        logging.error(f'Error converting video: {e}', exc_info=True)
-        return False
+    file_size = os.path.getsize(converted_path)
+    logging.info(f'[API] Converted video file exists: {converted_filename}, size: {file_size} bytes')
+    
+    current_video_file = converted_filename
+    return True
 
 @app.get("/")
 def root():
@@ -158,16 +134,42 @@ async def upload_video(file: UploadFile = File(...)):
         # Создать папку если не существует
         os.makedirs(VIDEOS_DIR, exist_ok=True)
         
-        # Сохранить файл
-        file_path = os.path.join(VIDEOS_DIR, file.filename)
-        with open(file_path, "wb") as buffer:
+        # Сохранить оригинальный файл
+        original_path = os.path.join(VIDEOS_DIR, file.filename)
+        with open(original_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        logging.info(f'Uploaded video: {file.filename}')
-        return {"message": "Video uploaded successfully", "filename": file.filename}
+        logging.info(f'[API] Original video uploaded: {file.filename}')
+        
+        # Конвертируем в нужный формат сразу при загрузке
+        converted_filename = f"converted_{file.filename}"
+        converted_path = os.path.join(VIDEOS_DIR, converted_filename)
+        
+        cmd = [
+            'ffmpeg',
+            '-i', original_path,
+            '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
+            '-c:v', 'libx264',  # кодек
+            '-preset', 'ultrafast',  # быстрый пресет
+            '-y',  # перезаписать файл если существует
+            converted_path
+        ]
+        
+        logging.info(f'[API] Converting video: {" ".join(cmd)}')
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode != 0:
+            logging.error(f'[API] FFmpeg conversion failed. Return code: {result.returncode}')
+            logging.error(f'[API] FFmpeg stderr: {result.stderr}')
+            # Удаляем оригинальный файл если конвертация не удалась
+            os.remove(original_path)
+            raise HTTPException(status_code=500, detail="Failed to convert video")
+        
+        logging.info(f'[API] Video converted successfully: {converted_filename}')
+        return {"message": "Video uploaded and converted successfully", "filename": file.filename, "converted_filename": converted_filename}
         
     except Exception as e:
-        logging.error(f'Error uploading video: {e}')
+        logging.error(f'[API] Error uploading video: {e}', exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload video")
 
 @app.post("/api/videos/start")

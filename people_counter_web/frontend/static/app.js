@@ -442,7 +442,7 @@ async function uploadVideo() {
   formData.append('file', file);
   
   try {
-    setStatus('Загрузка видео...', false);
+    setStatus('Загрузка и конвертация видео...', false);
     const response = await fetch('/api/videos/upload', {
       method: 'POST',
       body: formData
@@ -450,7 +450,7 @@ async function uploadVideo() {
     
     if (response.ok) {
       const result = await response.json();
-      setStatus(`Видео загружено: ${result.filename}`, false);
+      setStatus(`Видео загружено и сконвертировано: ${result.filename}`, false);
       await loadVideoList();
       fileInput.value = '';
     } else {
