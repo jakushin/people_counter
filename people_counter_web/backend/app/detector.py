@@ -181,7 +181,7 @@ class PersonDetector:
                     indices = cv2.dnn.NMSBoxes(
                         person_boxes.tolist(), 
                         person_confs.tolist(), 
-                        conf_threshold=0.7,  # Высокий порог confidence
+                        score_threshold=0.7,  # Высокий порог confidence
                         nms_threshold=0.3    # Строгий NMS (было 0.5)
                     )
                     
