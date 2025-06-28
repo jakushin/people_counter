@@ -88,7 +88,7 @@ class PersonDetector:
                 y_min, y_max = max(0, ys.min()), min(h, ys.max())
                 if x_max > x_min and y_max > y_min:
                     crop_frame = frame[y_min:y_max, x_min:x_max]
-                    crop_offset = (x_min, y_min)
+                    crop_offset = (int(x_min), int(y_min))
                     verbose_log(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
                 else:
                     logging.warning(f"[CROP] Invalid crop dimensions: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
@@ -96,6 +96,7 @@ class PersonDetector:
             else:
                 verbose_log(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
                 x_min, y_min = 0, 0
+                crop_offset = (0, 0)
             crop_h, crop_w = crop_frame.shape[:2]
             imgsz = self.calculate_adaptive_imgsz(crop_h, crop_w, h, w)
             verbose_log(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
@@ -128,10 +129,10 @@ class PersonDetector:
                         x1, y1, x2, y2 = map(int, box)
                         
                         # Добавляем смещение от crop к координатам в оригинальном кадре
-                        x1 += crop_offset[0]
-                        x2 += crop_offset[0]
-                        y1 += crop_offset[1]
-                        y2 += crop_offset[1]
+                        x1 += int(crop_offset[0])
+                        x2 += int(crop_offset[0])
+                        y1 += int(crop_offset[1])
+                        y2 += int(crop_offset[1])
                         
                         bbox_w, bbox_h = x2 - x1, y2 - y1
                         cx, cy = x1 + bbox_w // 2, y1 + bbox_h // 2
@@ -144,9 +145,11 @@ class PersonDetector:
                         
                         # Проверка ROI
                         if pts is not None:
-                            point = np.array([cx, cy], dtype=np.int32)
-                            if not cv2.pointPolygonTest(pts, (cx, cy), False) >= 0:
-                                verbose_log(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
+                            # Конвертируем координаты в правильный формат для OpenCV
+                            cx_int = int(cx)
+                            cy_int = int(cy)
+                            if not cv2.pointPolygonTest(pts, (cx_int, cy_int), False) >= 0:
+                                verbose_log(f"[ROI] Person center ({cx_int}, {cy_int}) outside ROI, skipping")
                                 continue
                         
                         person_count += 1
