@@ -68,8 +68,8 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8m.pt для детекции людей
-                self.model = YOLO('yolov8m.pt')
+                # Используем yolov8s.pt для детекции людей (быстрее чем medium)
+                self.model = YOLO('yolov8s.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
