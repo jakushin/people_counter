@@ -53,7 +53,7 @@ class ByteTrackerWrapper:
         """
         if not detections:
             # Если нет детекций, обновляем трекер пустым списком
-            self.tracker.update([], [self.frame_id], [])
+            self.tracker.update([], [], [])
             self.tracked_persons = []
             self.frame_id += 1
             return []
@@ -74,7 +74,7 @@ class ByteTrackerWrapper:
         
         # Обновляем трекер
         online_targets = self.tracker.update(
-            scores, bboxes, class_ids, [self.frame_id]
+            scores, bboxes, class_ids
         )
         
         # Обрабатываем результаты трекинга
