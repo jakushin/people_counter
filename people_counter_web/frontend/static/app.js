@@ -562,9 +562,9 @@ async function startVideo() {
         ws.close();
       }
       
-      // Даем время на закрытие и перезапускаем
+      // Автоматически подключаем WebSocket для видео файла
       setTimeout(() => {
-        console.log('Starting new WebSocket connection for video');
+        console.log('Automatically connecting WebSocket for video');
         connectWS();
       }, 1000);
     } else {
@@ -606,13 +606,16 @@ async function stopVideo() {
 function updateSourceControls() {
   const cameraControls = document.getElementById('camera-controls');
   const videoControls = document.getElementById('video-controls');
+  const startBtn = document.getElementById('start-btn');
   
   if (currentSource === 'camera') {
     cameraControls.style.display = 'block';
     videoControls.style.display = 'none';
+    startBtn.style.display = 'block'; // Показываем кнопку Старт для камеры
   } else {
     cameraControls.style.display = 'none';
     videoControls.style.display = 'block';
+    startBtn.style.display = 'none'; // Скрываем кнопку Старт для видео файла
   }
 }
 
