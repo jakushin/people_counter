@@ -176,9 +176,29 @@ class PersonDetector:
                 logging.info(f"[DETECT] No objects detected in crop")
             
             t2 = time.time()
-            # Рисуем ROI
+            # Рисуем ROI красными линиями
             if pts is not None:
                 cv2.polylines(annotated, [pts], True, (255, 0, 0), 2)
+            
+            # Рисуем область поиска (crop area) синими линиями
+            if crop_offset[0] > 0 or crop_offset[1] > 0:
+                # Вычисляем координаты прямоугольника crop области
+                crop_x1 = int(crop_offset[0])
+                crop_y1 = int(crop_offset[1])
+                crop_x2 = crop_x1 + crop_w
+                crop_y2 = crop_y1 + crop_h
+                
+                # Рисуем прямоугольник crop области синими линиями
+                cv2.rectangle(annotated, (crop_x1, crop_y1), (crop_x2, crop_y2), (255, 0, 0), 2)  # Синий цвет (BGR)
+                
+                # Добавляем текст с информацией о размере
+                cv2.putText(annotated, f'Search: {crop_w}x{crop_h}', 
+                           (crop_x1, crop_y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+            else:
+                # Если ROI не задано, показываем что анализируется весь кадр
+                cv2.rectangle(annotated, (0, 0), (w, h), (255, 0, 0), 2)  # Синий цвет (BGR)
+                cv2.putText(annotated, f'Search: Full frame {w}x{h}', 
+                           (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
             t3 = time.time()
             
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
