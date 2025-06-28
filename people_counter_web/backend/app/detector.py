@@ -154,49 +154,49 @@ class PersonDetector:
                             verbose_log(f"[FILTER] Skipping bbox with NaN values: {box}")
                             continue
                         
-                        person_boxes.append(box)
+                        x1, y1, x2, y2 = map(int, box)
+                        
+                        # Добавляем смещение от crop области
+                        x1 += crop_offset[0]
+                        y1 += crop_offset[1]
+                        x2 += crop_offset[0]
+                        y2 += crop_offset[1]
+                        
+                        # Проверяем размер bounding box (отфильтровываем слишком маленькие)
+                        width = x2 - x1
+                        height = y2 - y1
+                        if width < 20 or height < 40:  # Минимальные размеры для человека
+                            verbose_log(f"[FILTER] Skipping small bbox: {width}x{height}")
+                            continue
+                        
+                        person_boxes.append([x1, y1, x2, y2])
                         person_confs.append(conf)
                 
                 # Применяем NMS для удаления дублирующихся детекций
-                if len(person_boxes) > 0:
+                if person_boxes:
                     person_boxes = np.array(person_boxes)
                     person_confs = np.array(person_confs)
                     
-                    # Используем OpenCV NMS
+                    # Применяем NMS с более строгими параметрами
                     indices = cv2.dnn.NMSBoxes(
                         person_boxes.tolist(), 
                         person_confs.tolist(), 
-                        score_threshold=0.7, 
-                        nms_threshold=0.5
+                        conf_threshold=0.7,  # Высокий порог confidence
+                        nms_threshold=0.3    # Строгий NMS (было 0.5)
                     )
                     
                     if len(indices) > 0:
                         indices = indices.flatten()
                         for idx in indices:
-                            box = person_boxes[idx]
+                            x1, y1, x2, y2 = person_boxes[idx]
                             conf = person_confs[idx]
-                            
-                            x1, y1, x2, y2 = map(int, box)
-                            
-                            # Добавляем смещение от crop к координатам в оригинальном кадре
-                            x1 += int(crop_offset[0])
-                            x2 += int(crop_offset[0])
-                            y1 += int(crop_offset[1])
-                            y2 += int(crop_offset[1])
-                            
-                            bbox_w, bbox_h = x2 - x1, y2 - y1
-                            
-                            # Фильтрация по размеру
-                            min_size, max_size = 30, 400
-                            if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
-                                verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
-                                continue
-                            
-                            # Добавляем детекцию в список
-                            detections.append((x1, y1, x2, y2, conf, 0))  # 0 = person class
+                            detections.append((x1, y1, x2, y2, conf, 0))
+                    else:
+                        verbose_log("[FILTER] NMS removed all detections")
+                else:
+                    verbose_log("[FILTER] No person detections after filtering")
             else:
-                # Логируем отсутствие объектов всегда, так как это важно для диагностики
-                logging.info(f"[DETECT] No objects detected in crop")
+                logging.info("[DETECT] No objects detected in crop")
             
             # Отрисовываем детекции людей
             for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
@@ -223,8 +223,18 @@ class PersonDetector:
                             for corner in corners
                         )
                 
-                # Рисуем bounding box с цветом в зависимости от нахождения в ROI
-                color = (0, 255, 0) if is_inside_roi else (0, 165, 255)  # Зеленый если внутри ROI, оранжевый если снаружи
+                # Используем стабильные цвета на основе confidence, а не индекса
+                if is_inside_roi:
+                    if conf > 0.85:
+                        color = (0, 255, 0)  # Ярко-зеленый для высокого confidence
+                    else:
+                        color = (0, 200, 0)  # Темно-зеленый для среднего confidence
+                else:
+                    if conf > 0.85:
+                        color = (0, 165, 255)  # Оранжевый для высокого confidence
+                    else:
+                        color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
+                
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 
                 # Добавляем текст с confidence
