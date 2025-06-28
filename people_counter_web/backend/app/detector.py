@@ -159,6 +159,9 @@ class PersonDetector:
                     
                     if worker_idx is not None:
                         logging.info(f"[DETECTOR] Worker {worker_idx} found {len(xyxy)} total detections")
+                        # Логируем все детекции для диагностики
+                        for i, (cls_id, conf, bbox) in enumerate(zip(class_ids, confidences, xyxy)):
+                            logging.info(f"[DETECTOR] Worker {worker_idx} detection {i}: class={cls_id}, conf={conf:.3f}, bbox={bbox}")
                     
                     # Фильтруем только людей (class 0)
                     person_indices = np.where(class_ids == 0)[0]
@@ -376,6 +379,9 @@ class PersonDetector:
         
         # Финальный размер
         imgsz = min(crop_imgsz, max_imgsz)
+        
+        # Округляем до кратного 32 (требование YOLO)
+        imgsz = ((imgsz + 16) // 32) * 32
         
         # Логируем только в verbose режиме
         verbose_log(f"[YOLO_LOGIC] Crop: {crop_w}x{crop_h}, Original: {original_w}x{original_h}")
