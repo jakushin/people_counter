@@ -135,20 +135,28 @@ class PersonDetector:
                 clss = results[0].boxes.cls.cpu().numpy()
                 confs = results[0].boxes.conf.cpu().numpy()
                 
-                # Логируем обнаружение объектов всегда, так как это важно для диагностики
+                # Подробная диагностика всех объектов
                 logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
+                
+                # Подсчитываем количество людей
+                person_count_found = np.sum(clss == 0)
+                logging.info(f"[DETECT] Person objects found: {person_count_found}")
                 
                 # Фильтруем только людей
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
+                    logging.info(f"[DETECT] Object {i}: class={cls}, conf={conf:.3f}, bbox={box}")
+                    
                     if cls == 0:  # person class
+                        logging.info(f"[DETECT] Processing person object {i}")
+                        
                         # Фильтруем по confidence
                         if conf < 0.5:  # Минимальный порог confidence
-                            verbose_log(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
+                            logging.info(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
                             continue
                         
                         # Проверяем на NaN значения
                         if np.isnan(box).any():
-                            verbose_log(f"[FILTER] Skipping bbox with NaN values: {box}")
+                            logging.info(f"[FILTER] Skipping bbox with NaN values: {box}")
                             continue
                         
                         x1, y1, x2, y2 = map(int, box)
@@ -163,19 +171,30 @@ class PersonDetector:
                         width = x2 - x1
                         height = y2 - y1
                         if width < 30 or height < 60:  # Минимальные размеры для человека
-                            verbose_log(f"[FILTER] Skipping small bbox: {width}x{height}")
+                            logging.info(f"[FILTER] Skipping small bbox: {width}x{height}")
                             continue
                         
+                        logging.info(f"[DETECT] Adding person detection: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
                         # Добавляем детекцию в список
                         detections.append((x1, y1, x2, y2, conf, 0))
+                    else:
+                        logging.info(f"[FILTER] Skipping non-person object: class={cls}")
             else:
                 logging.info("[DETECT] No objects detected in crop")
+            
+            logging.info(f"[DETECT] Final detections count: {len(detections)}")
+            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
+                logging.info(f"[DETECT] Final detection {i}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
             
             # Отрисовываем детекции людей
             # Сортируем детекции по позиции (слева направо) для стабильной нумерации
             sorted_detections = sorted(detections, key=lambda x: x[0])  # сортируем по x1 (левая координата)
             
+            logging.info(f"[DRAW] Drawing {len(sorted_detections)} sorted detections")
+            
             for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(sorted_detections):
+                logging.info(f"[DRAW] Drawing detection {i}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
+                
                 # Проверяем, находится ли человек внутри ROI
                 is_inside_roi = False
                 if pts is not None:
@@ -210,6 +229,8 @@ class PersonDetector:
                         color = (0, 165, 255)  # Оранжевый для высокого confidence
                     else:
                         color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
+                
+                logging.info(f"[DRAW] Detection {i}: color={color}, inside_roi={is_inside_roi}")
                 
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 
