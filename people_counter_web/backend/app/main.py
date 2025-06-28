@@ -224,7 +224,10 @@ async def websocket_endpoint(
     last_mem = 0
     last_send_time = time.time()
     try:
+        logging.info(f'[WS] Creating VideoStream for: {rtsp_url}')
         stream = VideoStream(rtsp_url)
+        logging.info(f'[WS] VideoStream created successfully')
+        
         #detector = PersonDetector()
         detector = MultiprocessPersonDetector(num_workers=4)
         logging.info(f"[MAIN] Using detector class: {type(detector)}, PID: {os.getpid()}")
@@ -271,6 +274,12 @@ async def websocket_endpoint(
             except Exception as e:
                 logging.error(f'Detection error: {e}')
                 await asyncio.sleep(0.1)
+    except Exception as e:
+        logging.error(f'[WS] Error creating VideoStream: {e}', exc_info=True)
+        await websocket.send_text(json.dumps({
+            'status': 'error',
+            'message': f'Failed to create video stream: {str(e)}'
+        }))
     except WebSocketDisconnect:
         logging.info('WebSocket disconnected')
     except Exception as e:

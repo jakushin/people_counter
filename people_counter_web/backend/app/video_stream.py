@@ -31,10 +31,24 @@ class VideoStream:
         if self.cap:
             self.cap.release()
         logging.info(f'[VIDEO_STREAM] Attempting to connect to: {self.rtsp_url}')
+        
+        # Проверяем существование файла
+        if self.is_file:
+            if not os.path.exists(self.rtsp_url):
+                logging.error(f'[VIDEO_STREAM] File does not exist: {self.rtsp_url}')
+                raise RuntimeError(f'File does not exist: {self.rtsp_url}')
+            file_size = os.path.getsize(self.rtsp_url)
+            logging.info(f'[VIDEO_STREAM] File exists, size: {file_size} bytes')
+        
         with self.suppress_stderr():
             self.cap = cv2.VideoCapture(self.rtsp_url)
-        if not self.cap or not self.cap.isOpened():
-            logging.error(f'Cannot open video source: {self.rtsp_url}')
+        
+        if not self.cap:
+            logging.error(f'[VIDEO_STREAM] cv2.VideoCapture returned None for: {self.rtsp_url}')
+            raise RuntimeError('cv2.VideoCapture returned None')
+        
+        if not self.cap.isOpened():
+            logging.error(f'[VIDEO_STREAM] Cannot open video source: {self.rtsp_url}')
             raise RuntimeError('Cannot open video source')
         
         if self.is_file:
