@@ -173,19 +173,33 @@ async def upload_video(file: UploadFile = File(...)):
 @app.post("/api/videos/start")
 def start_video(video_filename: str = Query(...)):
     """Запустить видео как RTSP поток"""
+    global current_video_file
+    
     if not os.path.exists(os.path.join(VIDEOS_DIR, video_filename)):
         raise HTTPException(status_code=404, detail="Video file not found")
     
+    logging.info(f'[API] Starting video: {video_filename}')
+    current_video_file = video_filename
+    
     if start_video_stream(video_filename):
+        logging.info(f'[API] Video started successfully: {video_filename}')
         return {"message": f"Video stream started: {video_filename}"}
     else:
+        logging.error(f'[API] Failed to start video: {video_filename}')
+        current_video_file = None  # Сбрасываем при ошибке
         raise HTTPException(status_code=500, detail="Failed to start video stream")
 
 @app.post("/api/videos/stop")
 def stop_video():
     """Остановить текущий видео поток"""
-    stop_current_video()
-    return {"message": "Video stream stopped"}
+    global current_video_file
+    if current_video_file:
+        logging.info(f'[API] Stopping video: {current_video_file}')
+        current_video_file = None
+        return {"message": "Video stream stopped"}
+    else:
+        logging.info('[API] No video to stop')
+        return {"message": "No video stream to stop"}
 
 @app.get("/api/videos/current")
 def get_current_video():
@@ -219,6 +233,7 @@ async def websocket_endpoint(
         await websocket.send_text(json.dumps({"type": "roi", "points": roi}))
     
     logging.info(f'[WS] Starting video stream with source: {rtsp_url}')
+    logging.info(f'[WS] Current video file state: {current_video_file}')
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0

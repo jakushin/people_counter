@@ -189,10 +189,17 @@ function connectWS() {
     return;
   }
   
-  // Для видео используем фиктивные параметры, так как RTSP URL формируется на backend
-  const wsUrl = currentSource === 'video' 
-    ? `ws://${window.location.host}/ws?user=dummy&password=dummy&host=dummy`
-    : `ws://${window.location.host}/ws?user=${user}&password=${password}&host=${host}`;
+  // Формируем WebSocket URL
+  let wsUrl;
+  if (currentSource === 'video') {
+    // Для видео используем фиктивные параметры, так как RTSP URL формируется на backend
+    wsUrl = `ws://${window.location.host}/ws?user=dummy&password=dummy&host=dummy`;
+    console.log('Connecting to WebSocket for video:', wsUrl);
+  } else {
+    // Для камеры используем реальные параметры
+    wsUrl = `ws://${window.location.host}/ws?user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}&host=${encodeURIComponent(host)}`;
+    console.log('Connecting to WebSocket for camera:', wsUrl);
+  }
   
   setStatus('Подключение...', false);
   ws = new WebSocket(wsUrl);
@@ -382,12 +389,14 @@ window.addEventListener('DOMContentLoaded', () => {
   cameraSource.addEventListener('change', () => {
     currentSource = 'camera';
     updateSourceControls();
+    resetVideoState();
   });
   
   videoSource.addEventListener('change', () => {
     currentSource = 'video';
     updateSourceControls();
     loadVideoList();
+    resetVideoState();
   });
   
   uploadBtn.addEventListener('click', uploadVideo);
@@ -472,11 +481,18 @@ async function startVideo() {
       const result = await response.json();
       setStatus(`Видео запущено: ${videoFile}`, false);
       currentVideo = videoFile;
-      // Если поток уже запущен, перезапускаем его
+      
+      // Закрываем текущий WebSocket если он открыт
       if (ws && ws.readyState === 1) {
+        console.log('Closing existing WebSocket connection');
         ws.close();
-        setTimeout(connectWS, 1000);
       }
+      
+      // Даем время на закрытие и перезапускаем
+      setTimeout(() => {
+        console.log('Starting new WebSocket connection for video');
+        connectWS();
+      }, 1000);
     } else {
       const error = await response.json();
       setStatus(`Ошибка запуска: ${error.detail}`, true);
@@ -496,10 +512,11 @@ async function stopVideo() {
     if (response.ok) {
       setStatus('Видео остановлено', false);
       currentVideo = null;
-      // Если поток запущен, перезапускаем его для камеры
+      
+      // Закрываем текущий WebSocket если он открыт
       if (ws && ws.readyState === 1) {
+        console.log('Closing WebSocket connection after stopping video');
         ws.close();
-        setTimeout(connectWS, 1000);
       }
     } else {
       setStatus('Ошибка остановки видео', true);
@@ -520,5 +537,13 @@ function updateSourceControls() {
   } else {
     cameraControls.style.display = 'none';
     videoControls.style.display = 'block';
+  }
+}
+
+function resetVideoState() {
+  currentVideo = null;
+  if (ws && ws.readyState === 1) {
+    console.log('Closing WebSocket connection due to source change');
+    ws.close();
   }
 } 
