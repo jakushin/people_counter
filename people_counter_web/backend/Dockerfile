@@ -1,15 +1,23 @@
 FROM continuumio/miniconda3:latest
 WORKDIR /app
 
-# Установить libGL для OpenCV
-RUN apt-get update && apt-get install -y libgl1
+# Установить libGL для OpenCV и build tools для компиляции
+RUN apt-get update && apt-get install -y \
+    libgl1 \
+    build-essential \
+    gcc \
+    g++ \
+    make \
+    cmake \
+    pkg-config
 
 # Установить ffmpeg, opencv, numpy, ultralytics через conda
 RUN conda install -y -c conda-forge ffmpeg opencv numpy && \
+    conda install -y pytorch torchvision -c pytorch && \
     pip install ultralytics fastapi uvicorn psutil
 
 # Вывести версии основных библиотек
-RUN python -c "import cv2, numpy, ultralytics, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__)" && \
+RUN python -c "import cv2, numpy, ultralytics, torch, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__); print('PyTorch', torch.__version__)" && \
     ffmpeg -version | head -1
 
 COPY requirements.txt .
