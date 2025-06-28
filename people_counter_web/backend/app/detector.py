@@ -12,6 +12,20 @@ import psutil
 from multiprocessing import Process, Queue, cpu_count
 import queue as pyqueue
 
+# Настройка уровней логирования
+DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
+VERBOSE_MODE = os.environ.get('VERBOSE_MODE', 'false').lower() == 'true'
+
+def debug_log(message):
+    """Логировать только в debug режиме"""
+    if DEBUG_MODE:
+        logging.info(message)
+
+def verbose_log(message):
+    """Логировать только в verbose режиме"""
+    if VERBOSE_MODE:
+        logging.info(message)
+
 @contextlib.contextmanager
 def suppress_all_output():
     # Подавляет stdout/stderr для Python и C/C++ (fd 1 и 2)
@@ -41,15 +55,15 @@ cv2.setLogLevel(0)
 
 class PersonDetector:
     def __init__(self):
-        logging.info(f"[PD_INIT] PersonDetector init in PID: {os.getpid()}, Thread: {threading.get_ident()}")
+        debug_log(f"[PD_INIT] PersonDetector init in PID: {os.getpid()}, Thread: {threading.get_ident()}")
         # Автоматически определяем число доступных ядер
         try:
             import torch
             num_cores = multiprocessing.cpu_count()
             torch.set_num_threads(num_cores)
             torch.set_num_interop_threads(min(2, num_cores))
-            logging.info(f"[INIT] PyTorch num_threads set to {num_cores}")
-            logging.info(f"[INIT] torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}")
+            debug_log(f"[INIT] PyTorch num_threads set to {num_cores}")
+            debug_log(f"[INIT] torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}")
         except Exception as e:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
@@ -75,24 +89,28 @@ class PersonDetector:
                 if x_max > x_min and y_max > y_min:
                     crop_frame = frame[y_min:y_max, x_min:x_max]
                     crop_offset = (x_min, y_min)
-                    logging.info(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
+                    verbose_log(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
                 else:
                     logging.warning(f"[CROP] Invalid crop dimensions: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
                     return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
             else:
-                logging.info(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
+                verbose_log(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
                 x_min, y_min = 0, 0
             crop_h, crop_w = crop_frame.shape[:2]
             imgsz = self.calculate_adaptive_imgsz(crop_h, crop_w, h, w)
-            logging.info(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
-            thread_id = threading.get_ident()
-            pid = os.getpid()
-            cpu_percent = psutil.cpu_percent(interval=None)
-            cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
-            mem = psutil.virtual_memory()
-            proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
-            import torch
-            logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
+            verbose_log(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
+            
+            # Детальная информация о системе только в debug режиме
+            if DEBUG_MODE:
+                thread_id = threading.get_ident()
+                pid = os.getpid()
+                cpu_percent = psutil.cpu_percent(interval=None)
+                cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+                mem = psutil.virtual_memory()
+                proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
+                import torch
+                logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
+            
             with suppress_all_output():
                 results = self.model(crop_frame, imgsz=imgsz, conf=0.4)
             t1 = time.time()
@@ -102,45 +120,53 @@ class PersonDetector:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 clss = results[0].boxes.cls.cpu().numpy()
                 confs = results[0].boxes.conf.cpu().numpy()
-                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
-                for box, cls_id, conf in zip(boxes, clss, confs):
-                    if int(cls_id) != 0:
-                        continue
-                    x1, y1, x2, y2 = map(int, box)
-                    x1 += crop_offset[0]
-                    x2 += crop_offset[0]
-                    y1 += crop_offset[1]
-                    y2 += crop_offset[1]
-                    cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
-                    bbox_w, bbox_h = x2 - x1, y2 - y1
-                    
-                    # Фильтрация по размеру bbox (отбрасываем слишком маленькие/большие)
-                    min_size = 30  # минимальный размер человека в пикселях
-                    max_size = max(crop_w, crop_h) // 2  # максимальный размер - половина crop
-                    if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
-                        logging.info(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
-                        continue
-                    
-                    if pts is not None and cv2.pointPolygonTest(pts, (float(cx), float(cy)), False) < 0:
-                        logging.info(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
-                        continue
-                    cv2.rectangle(annotated, (x1, y1), (x2, y2), (0,255,0), 2)
-                    person_count += 1
-                    logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
+                verbose_log(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
+                
+                for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
+                    if cls == 0:  # person class
+                        x1, y1, x2, y2 = map(int, box)
+                        bbox_w, bbox_h = x2 - x1, y2 - y1
+                        cx, cy = x1 + bbox_w // 2, y1 + bbox_h // 2
+                        
+                        # Фильтрация по размеру
+                        min_size, max_size = 30, 400
+                        if bbox_w < min_size or bbox_h < min_size or bbox_w > max_size or bbox_h > max_size:
+                            verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
+                            continue
+                        
+                        # Проверка ROI
+                        if pts is not None:
+                            point = np.array([cx, cy], dtype=np.int32)
+                            if not cv2.pointPolygonTest(pts, (cx, cy), False) >= 0:
+                                verbose_log(f"[ROI] Person center ({cx}, {cy}) outside ROI, skipping")
+                                continue
+                        
+                        person_count += 1
+                        verbose_log(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
+                        
+                        # Рисуем bounding box
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        cv2.putText(annotated, f'Person {person_count}', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             else:
-                logging.info(f"[DETECT] No objects detected in crop")
+                verbose_log(f"[DETECT] No objects detected in crop")
+            
             t2 = time.time()
-            if roi and len(roi) >= 3:
-                pts = np.array(roi, dtype=np.int32)
-                cv2.polylines(annotated, [pts], isClosed=True, color=(0,255,255), thickness=2)
+            # Рисуем ROI
+            if pts is not None:
+                cv2.polylines(annotated, [pts], True, (255, 0, 0), 2)
             t3 = time.time()
+            
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
             success, jpeg = cv2.imencode('.jpg', annotated, encode_param)
             if not success or jpeg is None or len(jpeg) == 0:
                 logging.error(f"[JPEG] Failed to encode image: success={success}, jpeg_size={len(jpeg) if jpeg is not None else 'None'}")
                 return self._create_empty_frame(frame.shape[:2]), crop_h, crop_w, imgsz
             t4 = time.time()
-            logging.info(f'[DETECTOR] Inference: {t1-t0:.3f}s, Draw: {t2-t1:.3f}s, JPEG: {t3-t2:.3f}s')
+            
+            # Логируем время обработки только в debug режиме
+            if DEBUG_MODE:
+                logging.info(f'[DETECTOR] Inference: {t1-t0:.3f}s, Draw: {t2-t1:.3f}s, JPEG: {t3-t2:.3f}s')
+            
             return jpeg.tobytes(), crop_h, crop_w, imgsz
         except Exception as e:
             logging.error(f'Detection error: {e}', exc_info=True)
@@ -148,59 +174,41 @@ class PersonDetector:
             logging.error(f"[ERROR_DETAILS] Frame shape: {frame.shape}, ROI: {roi}, Crop offset: {crop_offset}")
             return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
-    def _create_empty_frame(self, shape):
-        """Создаёт пустой кадр-заглушку при ошибках"""
-        try:
-            # Создаём чёрный кадр с текстом "No image"
-            h, w = shape
-            empty_frame = np.zeros((h, w, 3), dtype=np.uint8)
-            # Добавляем текст
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            text = "No image"
-            text_size = cv2.getTextSize(text, font, 1, 2)[0]
-            text_x = (w - text_size[0]) // 2
-            text_y = (h + text_size[1]) // 2
-            cv2.putText(empty_frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
-            # Кодируем в JPEG
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-            success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
-            if success:
-                return jpeg.tobytes()
-            else:
-                logging.error("[JPEG] Failed to encode empty frame")
-                return b''
-        except Exception as e:
-            logging.error(f"[EMPTY_FRAME] Error creating empty frame: {e}")
-            return b''
-
     def calculate_adaptive_imgsz(self, crop_h, crop_w, original_h, original_w):
-        """Умная подстройка imgsz под размер кадра"""
-        max_original = max(original_h, original_w)
+        """Адаптивный выбор размера изображения для YOLO"""
+        # Определяем максимальный размер оригинального изображения
+        max_original = max(original_w, original_h)
         
-        # Определяем максимальный imgsz на основе размера кадра
+        # Базовые размеры для разных типов кадров
         if max_original <= 640:
-            max_imgsz = max_original
+            max_imgsz = 640
             reason = "small_frame"
         elif max_original <= 1280:
             max_imgsz = 960
             reason = "medium_frame"
         else:
-            max_imgsz = 640
+            max_imgsz = 1280
             reason = "large_frame"
         
-        # Вычисляем imgsz для crop
-        max_crop = max(crop_h, crop_w)
-        crop_imgsz = int(np.ceil(max_crop / 32) * 32)
+        # Размер для кропа
+        crop_imgsz = min(576, max(crop_w, crop_h))
         
-        # Применяем ограничения
-        imgsz = max(128, min(max_imgsz, crop_imgsz))
+        # Финальный размер
+        imgsz = min(crop_imgsz, max_imgsz)
         
-        # Детальное логирование
-        logging.info(f"[YOLO_LOGIC] Crop: {crop_w}x{crop_h}, Original: {original_w}x{original_h}")
-        logging.info(f"[YOLO_LOGIC] Max_original: {max_original}, Max_imgsz: {max_imgsz} ({reason})")
-        logging.info(f"[YOLO_LOGIC] Crop_imgsz: {crop_imgsz}, Final_imgsz: {imgsz}")
+        # Логируем только в verbose режиме
+        verbose_log(f"[YOLO_LOGIC] Crop: {crop_w}x{crop_h}, Original: {original_w}x{original_h}")
+        verbose_log(f"[YOLO_LOGIC] Max_original: {max_original}, Max_imgsz: {max_imgsz} ({reason})")
+        verbose_log(f"[YOLO_LOGIC] Crop_imgsz: {crop_imgsz}, Final_imgsz: {imgsz}")
         
         return imgsz
+
+    def _create_empty_frame(self, shape):
+        """Создать пустой кадр"""
+        empty_frame = np.zeros((shape[0], shape[1], 3), dtype=np.uint8)
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+        success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
+        return jpeg.tobytes() if success else b''
 
 class MultiprocessPersonDetector:
     def __init__(self, num_workers=None):
@@ -210,25 +218,26 @@ class MultiprocessPersonDetector:
         self.workers = []
         self.frame_idx = 0
         self.next_send_idx = 0
-        logging.info(f"[MP_INIT] Main PID: {os.getpid()}, num_workers: {self.num_workers}")
+        debug_log(f"[MP_INIT] Main PID: {os.getpid()}, num_workers: {self.num_workers}")
         for i in range(self.num_workers):
             try:
                 p = Process(target=self.worker, args=(self.input_queue, self.output_queue, i))
                 p.daemon = True
                 p.start()
                 self.workers.append(p)
-                logging.info(f"[MP_INIT] Started worker {i}, PID: {p.pid}")
+                debug_log(f"[MP_INIT] Started worker {i}, PID: {p.pid}")
             except Exception as e:
                 logging.error(f"[MP_INIT] Failed to start worker {i}: {e}")
         self.result_buffer = {}
 
     @staticmethod
     def worker(input_queue, output_queue, worker_idx):
-        logging.info(f"[MP_WORKER] Worker {worker_idx} started, PID: {os.getpid()}")
+        debug_log(f"[MP_WORKER] Worker {worker_idx} started, PID: {os.getpid()}")
         detector = PersonDetector()
-        mem = psutil.virtual_memory()
-        proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
-        logging.info(f"[MP_WORKER] Worker {worker_idx} PID: {os.getpid()}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
+        if DEBUG_MODE:
+            mem = psutil.virtual_memory()
+            proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
+            logging.info(f"[MP_WORKER] Worker {worker_idx} PID: {os.getpid()}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
         while True:
             try:
                 idx, frame, roi = input_queue.get(timeout=1)
@@ -244,27 +253,32 @@ class MultiprocessPersonDetector:
     def detect(self, frame, roi=None):
         idx = self.frame_idx
         self.frame_idx += 1
-        pid = os.getpid()
-        thread_id = threading.get_ident()
-        logging.info(f"[DETECT] [MP_DETECTOR] Main PID: {pid}, Thread ID: {thread_id}, sending frame idx: {idx}")
-        input_size = self.input_queue.qsize()
-        output_size = self.output_queue.qsize()
-        buffer_size = len(self.result_buffer)
-        logging.info(f"[MP_QUEUE] Input queue: {input_size}, Output queue: {output_size}, Buffer: {buffer_size}")
+        
+        # Логируем только в debug режиме
+        if DEBUG_MODE:
+            pid = os.getpid()
+            thread_id = threading.get_ident()
+            logging.info(f"[DETECT] [MP_DETECTOR] Main PID: {pid}, Thread ID: {thread_id}, sending frame idx: {idx}")
+            input_size = self.input_queue.qsize()
+            output_size = self.output_queue.qsize()
+            buffer_size = len(self.result_buffer)
+            logging.info(f"[MP_QUEUE] Input queue: {input_size}, Output queue: {output_size}, Buffer: {buffer_size}")
+        
         try:
             self.input_queue.put((idx, frame, roi), timeout=1)
         except pyqueue.Full:
             logging.error(f"[MP_QUEUE] Input queue full, dropping frame {idx}")
             return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
+        
         while True:
             try:
                 out_idx, result = self.output_queue.get(timeout=2)
                 self.result_buffer[out_idx] = result
-                logging.info(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
+                verbose_log(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
                 if self.next_send_idx in self.result_buffer:
                     res = self.result_buffer.pop(self.next_send_idx)
                     self.next_send_idx += 1
-                    logging.info(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res) if isinstance(res, bytes) else 'tuple'}")
+                    verbose_log(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res) if isinstance(res, bytes) else 'tuple'}")
                     return res if isinstance(res, tuple) else (res, 0, 0, 0)
             except pyqueue.Empty:
                 logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")
@@ -273,26 +287,8 @@ class MultiprocessPersonDetector:
                 return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
     def _create_empty_frame(self, shape):
-        """Создаёт пустой кадр-заглушку при ошибках"""
-        try:
-            # Создаём чёрный кадр с текстом "No image"
-            h, w = shape
-            empty_frame = np.zeros((h, w, 3), dtype=np.uint8)
-            # Добавляем текст
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            text = "No image"
-            text_size = cv2.getTextSize(text, font, 1, 2)[0]
-            text_x = (w - text_size[0]) // 2
-            text_y = (h + text_size[1]) // 2
-            cv2.putText(empty_frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
-            # Кодируем в JPEG
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
-            success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
-            if success:
-                return jpeg.tobytes()
-            else:
-                logging.error("[JPEG] Failed to encode empty frame")
-                return b''
-        except Exception as e:
-            logging.error(f"[EMPTY_FRAME] Error creating empty frame: {e}")
-            return b'' 
+        """Создать пустой кадр"""
+        empty_frame = np.zeros((shape[0], shape[1], 3), dtype=np.uint8)
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]
+        success, jpeg = cv2.imencode('.jpg', empty_frame, encode_param)
+        return jpeg.tobytes() if success else b'' 

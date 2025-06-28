@@ -8,6 +8,10 @@ services:
     ports:
       - "8000:8000"
       - "8554:8554"
+    environment:
+      - DEBUG_MODE=false
+      - VERBOSE_MODE=false
+      - LOG_LEVEL=INFO
     restart: always
   frontend:
     build: ./frontend
