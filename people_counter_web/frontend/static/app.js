@@ -441,25 +441,74 @@ async function uploadVideo() {
   const formData = new FormData();
   formData.append('file', file);
   
+  // Показываем прогресс-бар
+  const progressDiv = document.getElementById('upload-progress');
+  const progressFill = document.querySelector('.progress-fill');
+  const progressText = document.querySelector('.progress-text');
+  
+  progressDiv.style.display = 'block';
+  progressFill.style.width = '0%';
+  progressText.textContent = 'Загрузка файла...';
+  
   try {
+    // Симулируем прогресс загрузки
+    const progressInterval = setInterval(() => {
+      const currentWidth = parseInt(progressFill.style.width) || 0;
+      if (currentWidth < 90) {
+        progressFill.style.width = (currentWidth + 10) + '%';
+        if (currentWidth < 30) {
+          progressText.textContent = 'Загрузка файла...';
+        } else if (currentWidth < 60) {
+          progressText.textContent = 'Конвертация видео...';
+        } else {
+          progressText.textContent = 'Завершение...';
+        }
+      }
+    }, 500);
+    
     setStatus('Загрузка и конвертация видео...', false);
     const response = await fetch('/api/videos/upload', {
       method: 'POST',
       body: formData
     });
     
+    clearInterval(progressInterval);
+    progressFill.style.width = '100%';
+    progressText.textContent = 'Готово!';
+    
     if (response.ok) {
       const result = await response.json();
       setStatus(`Видео загружено и сконвертировано: ${result.filename}`, false);
       await loadVideoList();
       fileInput.value = '';
+      
+      // Скрываем прогресс-бар через 2 секунды
+      setTimeout(() => {
+        progressDiv.style.display = 'none';
+      }, 2000);
     } else {
       const error = await response.json();
       setStatus(`Ошибка загрузки: ${error.detail}`, true);
+      progressText.textContent = 'Ошибка!';
+      progressFill.style.background = '#ff4444';
+      
+      // Скрываем прогресс-бар через 3 секунды
+      setTimeout(() => {
+        progressDiv.style.display = 'none';
+        progressFill.style.background = 'linear-gradient(90deg, #ffa500, #ffb733)';
+      }, 3000);
     }
   } catch (error) {
     setStatus('Ошибка загрузки видео', true);
     console.error('Upload error:', error);
+    progressText.textContent = 'Ошибка!';
+    progressFill.style.background = '#ff4444';
+    
+    // Скрываем прогресс-бар через 3 секунды
+    setTimeout(() => {
+      progressDiv.style.display = 'none';
+      progressFill.style.background = 'linear-gradient(90deg, #ffa500, #ffb733)';
+    }, 3000);
   }
 }
 
