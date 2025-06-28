@@ -13,6 +13,7 @@ let lastImgW = 0;
 let lastImgH = 0;
 let reconnectTimeout = null;
 let wsUrl = null;
+let manualClose = false; // Флаг для предотвращения автопереподключения
 let lastStats = {
   timestamp: null,
   fps: null,
@@ -221,6 +222,14 @@ function connectWS() {
   ws.onclose = function(event) {
     console.log('WebSocket closed:', event.code, event.reason);
     setStatus('Соединение разорвано', true);
+    
+    // Не переподключаемся если это было ручное закрытие
+    if (manualClose) {
+      console.log('Manual close detected, not reconnecting');
+      manualClose = false;
+      return;
+    }
+    
     if (reconnectTimeout) clearTimeout(reconnectTimeout);
     reconnectTimeout = setTimeout(connectWS, 5000);
   };
@@ -549,6 +558,7 @@ async function startVideo() {
       // Закрываем текущий WebSocket если он открыт
       if (ws && ws.readyState === 1) {
         console.log('Closing existing WebSocket connection');
+        manualClose = true;
         ws.close();
       }
       
@@ -581,6 +591,7 @@ async function stopVideo() {
       // Закрываем текущий WebSocket если он открыт
       if (ws && ws.readyState === 1) {
         console.log('Closing WebSocket connection after stopping video');
+        manualClose = true;
         ws.close();
       }
     } else {
@@ -609,6 +620,7 @@ function resetVideoState() {
   currentVideo = null;
   if (ws && ws.readyState === 1) {
     console.log('Closing WebSocket connection due to source change');
+    manualClose = true;
     ws.close();
   }
 } 
