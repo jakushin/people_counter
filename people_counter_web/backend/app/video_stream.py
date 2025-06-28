@@ -127,9 +127,8 @@ class VideoStream:
                     self.fps = self.frame_count / (now - self.last_stat_time)
                     self.frame_count = 0
                     self.last_stat_time = now
-                    # Логируем FPS только каждые 10 секунд
-                    if int(now) % 10 == 0:
-                        verbose_log(f'[VIDEO_STREAM] FPS: {self.fps:.2f}')
+                    # Логируем FPS всегда, так как это важно для диагностики
+                    logging.info(f'[VIDEO_STREAM] FPS: {self.fps:.2f}')
                 
                 yield frame, {
                     'timestamp': now,

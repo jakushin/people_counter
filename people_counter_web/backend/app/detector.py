@@ -120,7 +120,8 @@ class PersonDetector:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 clss = results[0].boxes.cls.cpu().numpy()
                 confs = results[0].boxes.conf.cpu().numpy()
-                verbose_log(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
+                # Логируем обнаружение объектов всегда, так как это важно для диагностики
+                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
                 
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
@@ -149,13 +150,15 @@ class PersonDetector:
                                 continue
                         
                         person_count += 1
-                        verbose_log(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
+                        # Логируем обнаружение людей всегда, так как это важно для диагностики
+                        logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
                         
                         # Рисуем bounding box
                         cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         cv2.putText(annotated, f'Person {person_count}', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             else:
-                verbose_log(f"[DETECT] No objects detected in crop")
+                # Логируем отсутствие объектов всегда, так как это важно для диагностики
+                logging.info(f"[DETECT] No objects detected in crop")
             
             t2 = time.time()
             # Рисуем ROI
@@ -281,11 +284,13 @@ class MultiprocessPersonDetector:
             try:
                 out_idx, result = self.output_queue.get(timeout=2)
                 self.result_buffer[out_idx] = result
-                verbose_log(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
+                # Логируем получение результатов всегда, так как это важно для диагностики
+                logging.info(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
                 if self.next_send_idx in self.result_buffer:
                     res = self.result_buffer.pop(self.next_send_idx)
                     self.next_send_idx += 1
-                    verbose_log(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res) if isinstance(res, bytes) else 'tuple'}")
+                    # Логируем возврат результатов всегда, так как это важно для диагностики
+                    logging.info(f"[MP_RESULT] Returning frame {self.next_send_idx-1}, result size: {len(res) if isinstance(res, bytes) else 'tuple'}")
                     return res if isinstance(res, tuple) else (res, 0, 0, 0)
             except pyqueue.Empty:
                 logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")

@@ -324,7 +324,8 @@ async def websocket_endpoint(
             frame_count += 1
             # Логируем только каждые 100 кадров для уменьшения объема логов
             if frame_count % 100 == 1:
-                verbose_log(f"[MAIN] Frame {frame_count}: shape={frame.shape}, fps={stats.get('fps', 'N/A')}")
+                # Логируем информацию о кадрах всегда, так как это важно для диагностики
+                logging.info(f"[MAIN] Frame {frame_count}: shape={frame.shape}, fps={stats.get('fps', 'N/A')}")
             
             try:
                 # Проверяем состояние WebSocket перед обработкой
@@ -342,7 +343,8 @@ async def websocket_endpoint(
                             roi = data.get('points')
                             save_roi(roi)
                             roi_changed = True
-                            debug_log(f'[WS] ROI updated: {roi}')
+                            # Логируем обновление ROI всегда, так как это важно
+                            logging.info(f'[WS] ROI updated: {roi}')
                     except asyncio.TimeoutError:
                         break
                     except Exception as e:
@@ -360,7 +362,8 @@ async def websocket_endpoint(
                 
                 # Логируем только медленные кадры или каждые 100 кадров
                 if detect_time > 0.2 or frame_count % 100 == 1:
-                    verbose_log(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
+                    # Логируем время обработки всегда, так как это важно для диагностики
+                    logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
                 
                 # Отправляем статистику каждые 5 секунд
@@ -371,7 +374,8 @@ async def websocket_endpoint(
                         last_cpu = cpu_percent
                         last_mem = mem_percent
                         last_stat_time = now
-                        verbose_log(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%')
+                        # Логируем статистику всегда, так как она важна для диагностики
+                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%')
                 
                 # Отправляем кадр клиенту
                 try:
