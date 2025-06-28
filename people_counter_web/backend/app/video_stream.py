@@ -67,6 +67,7 @@ class VideoStream:
         prev_time = time.time()
         frame_times = []  # Для диагностики рывков
         logging.info(f'[VIDEO_STREAM] Starting async_frames loop for: {self.rtsp_url}')
+        
         while True:
             if not self.cap or not self.cap.isOpened():
                 logging.warning('Video source lost, reconnecting...')
@@ -115,7 +116,9 @@ class VideoStream:
                 if max_delta > avg_delta * 2:  # Если есть рывки
                     logging.warning(f'[VIDEO_STREAM] Frame timing issue: avg={avg_delta:.3f}s, min={min_delta:.3f}s, max={max_delta:.3f}s')
             
-            logging.info(f'[VIDEO_STREAM] Frame received. Shape: {frame.shape}, Delta: {delta:.3f}s, Read time: {(frame_read_time - frame_start_time)*1000:.1f}ms')
+            # Логируем только каждые 30 кадров для уменьшения объема логов
+            if self.frame_count % 30 == 0:
+                logging.info(f'[VIDEO_STREAM] Frame received. Shape: {frame.shape}, Delta: {delta:.3f}s, Read time: {(frame_read_time - frame_start_time)*1000:.1f}ms')
             
             # FPS calculation
             self.frame_count += 1
@@ -133,8 +136,7 @@ class VideoStream:
                 'shape': frame.shape[:2][::-1]  # (width, height)
             }
             
-            # Для файлов добавляем небольшую задержку для контроля FPS
-            if self.is_file:
-                await asyncio.sleep(0.1)  # 10 FPS для файлов
-            else:
-                await asyncio.sleep(0.01)  # RTSP поток 
+            # Убираем искусственную задержку - пусть система работает на максимальной скорости
+            # Небольшая задержка только для RTSP чтобы не перегружать сеть
+            if not self.is_file:
+                await asyncio.sleep(0.01)  # Только для RTSP потоков 

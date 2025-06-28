@@ -258,6 +258,7 @@ async def websocket_endpoint(
     host: str = Query(...)
 ):
     await websocket.accept()
+    logging.info(f'[WS] WebSocket connection accepted. User: {user}, Host: {host}')
     
     # Определяем источник видео
     if current_video_file:
@@ -266,22 +267,31 @@ async def websocket_endpoint(
         logging.info(f'[WS] Using video file: {current_video_file} -> {video_path}')
         # Передаем путь к файлу вместо RTSP URL
         rtsp_url = video_path
+        source_type = "VIDEO_FILE"
     else:
         # Используем камеру
         rtsp_url = f"rtsp://{user}:{password}@{host}:554/axis-media/media.amp?streamprofile=stream1"
         logging.info(f'[WS] Using camera stream: {rtsp_url}')
+        source_type = "CAMERA"
+    
+    logging.info(f'[WS] Source type: {source_type}, URL: {rtsp_url}')
+    logging.info(f'[WS] Current video file state: {current_video_file}')
     
     roi = load_roi()
     # Сразу отправляем ROI клиенту, если оно есть
     if roi:
-        await websocket.send_text(json.dumps({"type": "roi", "points": roi}))
+        try:
+            await websocket.send_text(json.dumps({"type": "roi", "points": roi}))
+            logging.info(f'[WS] ROI sent to client: {roi}')
+        except Exception as e:
+            logging.error(f'[WS] Failed to send ROI: {e}')
     
-    logging.info(f'[WS] Starting video stream with source: {rtsp_url}')
-    logging.info(f'[WS] Current video file state: {current_video_file}')
     last_stat_time = 0
     last_cpu = 0
     last_mem = 0
     last_send_time = time.time()
+    frame_count = 0
+    
     try:
         logging.info(f'[WS] Creating VideoStream for: {rtsp_url}')
         stream = VideoStream(rtsp_url)
@@ -293,9 +303,19 @@ async def websocket_endpoint(
         logging.info(f"[MAIN] VideoStream created successfully for: {rtsp_url}")
         
         async for frame, stats in stream.async_frames():
-            logging.info(f"[MAIN] Received frame: shape={frame.shape}, stats={stats}")
+            frame_count += 1
+            # Логируем только каждые 10 кадров для уменьшения объема логов
+            if frame_count % 10 == 1:
+                logging.info(f"[MAIN] Frame {frame_count}: shape={frame.shape}, fps={stats.get('fps', 'N/A')}")
+            
             try:
+                # Проверяем состояние WebSocket перед обработкой
+                if websocket.client_state.value != 1:
+                    logging.warning(f'[WS] WebSocket not connected, state: {websocket.client_state.value}')
+                    break
+                
                 roi_changed = False
+                # Обрабатываем входящие сообщения
                 while websocket.client_state.value == 1:
                     try:
                         msg = await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
@@ -304,43 +324,92 @@ async def websocket_endpoint(
                             roi = data.get('points')
                             save_roi(roi)
                             roi_changed = True
+                            logging.info(f'[WS] ROI updated: {roi}')
                     except asyncio.TimeoutError:
                         break
-                    except Exception:
+                    except Exception as e:
+                        logging.warning(f'[WS] Error processing message: {e}')
                         break
+                
+                # Детекция
                 t0 = time.time()
                 result, crop_h, crop_w, imgsz = detector.detect(frame, roi=roi)
                 t1 = time.time()
                 now = time.time()
-                logging.info(f'[MAIN] Detect+prep: {t1-t0:.3f}s, Time since last send: {now-last_send_time:.3f}s')
+                
+                detect_time = t1 - t0
+                time_since_last = now - last_send_time
+                
+                # Логируем только медленные кадры или каждые 30 кадров
+                if detect_time > 0.1 or frame_count % 30 == 1:
+                    logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
+                
+                # Обновляем статистику каждые 2 секунды
                 if now - last_stat_time >= 2.0:
                     last_cpu = int(round(psutil.cpu_percent()))
                     last_mem = int(round(psutil.virtual_memory().percent))
                     last_stat_time = now
-                await websocket.send_text(json.dumps({
-                    'timestamp': stats['timestamp'],
-                    'fps': stats['fps'],
-                    'shape': stats['shape'],
-                    'cpu': last_cpu,
-                    'mem': last_mem,
-                    'status': 'ok',
-                    'crop_h': crop_h,
-                    'crop_w': crop_w,
-                    'imgsz': imgsz
-                }))
-                await websocket.send_bytes(result)
+                    logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%')
+                
+                # Отправляем данные клиенту
+                try:
+                    # Проверяем состояние перед отправкой
+                    if websocket.client_state.value != 1:
+                        logging.warning(f'[WS] WebSocket disconnected before send, state: {websocket.client_state.value}')
+                        break
+                    
+                    # Отправляем метаданные
+                    metadata = {
+                        'timestamp': stats['timestamp'],
+                        'fps': stats['fps'],
+                        'shape': stats['shape'],
+                        'cpu': last_cpu,
+                        'mem': last_mem,
+                        'status': 'ok',
+                        'crop_h': crop_h,
+                        'crop_w': crop_w,
+                        'imgsz': imgsz,
+                        'frame_count': frame_count,
+                        'source_type': source_type
+                    }
+                    await websocket.send_text(json.dumps(metadata))
+                    
+                    # Проверяем состояние перед отправкой изображения
+                    if websocket.client_state.value != 1:
+                        logging.warning(f'[WS] WebSocket disconnected before image send, state: {websocket.client_state.value}')
+                        break
+                    
+                    # Отправляем изображение
+                    await websocket.send_bytes(result)
+                    
+                    # Логируем только каждые 50 кадров
+                    if frame_count % 50 == 1:
+                        logging.info(f'[WS] Frame {frame_count} sent successfully')
+                    
+                except Exception as e:
+                    logging.error(f'[WS] Error sending frame {frame_count}: {e}')
+                    break
+                    
             except Exception as e:
-                logging.error(f'Detection error: {e}')
+                logging.error(f'[WS] Detection error in frame {frame_count}: {e}')
                 await asyncio.sleep(0.1)
+                
     except Exception as e:
         logging.error(f'[WS] Error creating VideoStream: {e}', exc_info=True)
-        await websocket.send_text(json.dumps({
-            'status': 'error',
-            'message': f'Failed to create video stream: {str(e)}'
-        }))
+        try:
+            if websocket.client_state.value == 1:
+                await websocket.send_text(json.dumps({
+                    'status': 'error',
+                    'message': f'Failed to create video stream: {str(e)}'
+                }))
+        except Exception as send_error:
+            logging.error(f'[WS] Failed to send error message: {send_error}')
     except WebSocketDisconnect:
-        logging.info('WebSocket disconnected')
+        logging.info(f'[WS] WebSocket disconnected after {frame_count} frames')
     except Exception as e:
-        logging.error(f'WebSocket error: {e}')
-        await websocket.close() 
+        logging.error(f'[WS] WebSocket error: {e}')
+        try:
+            await websocket.close()
+        except:
+            pass 
