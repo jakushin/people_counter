@@ -157,7 +157,7 @@ class PersonDetector:
                 logging.info(f"[DETECT] No objects detected in crop")
             
             # Обновляем трекер ByteTrack
-            tracked_persons = self.tracker.update(detections, pts)
+            tracked_persons = self.tracker.update(detections, roi_polygon=pts)
             
             # Отрисовываем трекированные люди
             for tracked_person in tracked_persons:
