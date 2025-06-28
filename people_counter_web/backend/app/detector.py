@@ -172,7 +172,10 @@ class PersonDetector:
                 logging.info("[DETECT] No objects detected in crop")
             
             # Отрисовываем детекции людей
-            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
+            # Сортируем детекции по позиции (слева направо) для стабильной нумерации
+            sorted_detections = sorted(detections, key=lambda x: x[0])  # сортируем по x1 (левая координата)
+            
+            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(sorted_detections):
                 # Проверяем, находится ли человек внутри ROI
                 is_inside_roi = False
                 if pts is not None:
