@@ -69,14 +69,20 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8m.pt для детекции людей
-                self.model = YOLO('yolov8m.pt')
+                # Используем yolov8n.pt для детекции людей
+                self.model = YOLO('yolov8n.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
         
-        # Инициализируем трекер
-        self.tracker = ByteTrackerWrapper(track_thresh=0.5, track_buffer=30, match_thresh=0.8)
+        # Инициализируем YOLO модель
+        self.model = YOLO('yolov8n.pt')
+        
+        # Инициализируем трекер ByteTrack
+        # self.tracker = ByteTrackerWrapper()
+        
+        # Временно отключаем трекинг для диагностики
+        self.tracker = None
 
     def detect(self, frame, roi=None):
         try:
@@ -156,8 +162,40 @@ class PersonDetector:
                 # Логируем отсутствие объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] No objects detected in crop")
             
-            # Обновляем трекер ByteTrack
-            tracked_persons = self.tracker.update(detections, roi_polygon=pts)
+            # Временно отключаем трекинг для диагностики
+            tracked_persons = []
+            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
+                # Проверяем, находится ли человек внутри ROI
+                is_inside_roi = False
+                if pts is not None:
+                    # Проверяем центр bounding box
+                    center_x = int(x1 + (x2 - x1) // 2)
+                    center_y = int(y1 + (y2 - y1) // 2)
+                    is_inside_roi = cv2.pointPolygonTest(pts, (center_x, center_y), False) >= 0
+                    
+                    # Если центр внутри, проверяем все углы
+                    if is_inside_roi:
+                        corners = [
+                            (int(x1), int(y1)),  # top-left
+                            (int(x2), int(y1)),  # top-right
+                            (int(x2), int(y2)),  # bottom-right
+                            (int(x1), int(y2))   # bottom-left
+                        ]
+                        
+                        # Человек считается полностью внутри ROI только если все углы внутри
+                        is_inside_roi = all(
+                            cv2.pointPolygonTest(pts, corner, False) >= 0 
+                            for corner in corners
+                        )
+                
+                tracked_person = type('TrackedPerson', (), {
+                    'track_id': i,
+                    'bbox': (x1, y1, x2, y2),
+                    'confidence': conf,
+                    'class_id': cls_id,
+                    'is_inside_roi': is_inside_roi
+                })()
+                tracked_persons.append(tracked_person)
             
             # Отрисовываем трекированные люди
             for tracked_person in tracked_persons:
