@@ -84,166 +84,185 @@ class PersonDetector:
         # Временно отключаем трекинг для диагностики
         self.tracker = None
 
-    def detect(self, frame, roi=None):
+    def detect(self, frame, roi=None, worker_idx=None):
+        """
+        Детекция людей на кадре
+        Args:
+            frame: numpy array с кадром
+            roi: список точек ROI [(x1,y1), (x2,y2), ...]
+            worker_idx: ID worker процесса (для логирования)
+        """
         try:
-            t0 = time.time()
+            if worker_idx is not None:
+                logging.info(f"[DETECTOR] Worker {worker_idx} starting detection")
+            
             h, w = frame.shape[:2]
-            crop_offset = (0, 0)
-            crop_frame = frame
-            pts = np.array(roi, dtype=np.int32) if roi and len(roi) >= 3 else None
-            if pts is not None:
-                xs = pts[:, 0]
-                ys = pts[:, 1]
-                x_min, x_max = max(0, xs.min()), min(w, xs.max())
-                y_min, y_max = max(0, ys.min()), min(h, ys.max())
-                if x_max > x_min and y_max > y_min:
-                    crop_frame = frame[y_min:y_max, x_min:x_max]
-                    crop_offset = (int(x_min), int(y_min))
-                    verbose_log(f"[CROP] ROI crop: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}, crop_shape={crop_frame.shape}, original_shape={frame.shape}")
+            verbose_log(f"[DETECTOR] Frame size: {w}x{h}")
+            
+            # Определяем область поиска
+            if roi is not None and len(roi) >= 3:
+                # Создаем маску для ROI
+                mask = np.zeros((h, w), dtype=np.uint8)
+                pts = np.array(roi, dtype=np.int32)
+                cv2.fillPoly(mask, [pts], 255)
+                
+                # Находим границы ROI
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                if contours:
+                    x, y, crop_w, crop_h = cv2.boundingRect(contours[0])
+                    crop_offset = (x, y)
+                    verbose_log(f"[ROI] Crop area: {crop_w}x{crop_h} at offset {crop_offset}")
                 else:
-                    logging.warning(f"[CROP] Invalid crop dimensions: x_min={x_min}, x_max={x_max}, y_min={y_min}, y_max={y_max}")
-                    return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
+                    crop_offset = (0, 0)
+                    crop_w, crop_h = w, h
+                    verbose_log(f"[ROI] No valid ROI contours found, using full frame")
             else:
-                verbose_log(f"[CROP] No ROI, analyzing full frame: shape={frame.shape}")
-                x_min, y_min = 0, 0
                 crop_offset = (0, 0)
-            crop_h, crop_w = crop_frame.shape[:2]
+                crop_w, crop_h = w, h
+                pts = None
+                verbose_log(f"[ROI] No ROI provided, using full frame")
+            
+            # Адаптивный выбор размера изображения
             imgsz = self.calculate_adaptive_imgsz(crop_h, crop_w, h, w)
-            verbose_log(f"[YOLO] Using imgsz={imgsz} for crop {crop_w}x{crop_h}")
             
-            # Детальная информация о системе только в debug режиме
-            if DEBUG_MODE:
-                thread_id = threading.get_ident()
-                pid = os.getpid()
-                cpu_percent = psutil.cpu_percent(interval=None)
-                cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
-                mem = psutil.virtual_memory()
-                proc_mem = psutil.Process(os.getpid()).memory_info().rss / (1024*1024)
-                import torch
-                logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
+            # Кропаем область поиска
+            if crop_offset[0] > 0 or crop_offset[1] > 0:
+                crop_x1 = int(crop_offset[0])
+                crop_y1 = int(crop_offset[1])
+                crop_x2 = crop_x1 + crop_w
+                crop_y2 = crop_y1 + crop_h
+                crop_frame = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                verbose_log(f"[CROP] Cropped frame size: {crop_frame.shape[1]}x{crop_frame.shape[0]}")
+            else:
+                crop_frame = frame
+                verbose_log(f"[CROP] Using full frame (no crop)")
             
-            with suppress_all_output():
-                results = self.model(crop_frame, imgsz=imgsz, conf=0.5, verbose=False)
+            t0 = time.time()
+            # Детекция с YOLO
+            results = self.model(crop_frame, imgsz=imgsz, conf=0.5, iou=0.7, verbose=False)
             t1 = time.time()
-            annotated = frame.copy()
+            
+            if worker_idx is not None:
+                logging.info(f"[DETECTOR] Worker {worker_idx} YOLO inference completed in {t1-t0:.3f}s")
+            
+            # Обработка результатов
+            annotated = crop_frame.copy()
             person_count = 0
             
-            # Подготавливаем детекции для ByteTrack
-            detections = []
-            if results and results[0].boxes is not None and len(results[0].boxes) > 0:
-                boxes = results[0].boxes.xyxy.cpu().numpy()
-                clss = results[0].boxes.cls.cpu().numpy()
-                confs = results[0].boxes.conf.cpu().numpy()
-                
-                # Подробная диагностика всех объектов
-                logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
-                
-                # Подсчитываем количество людей
-                person_count_found = np.sum(clss == 0)
-                logging.info(f"[DETECT] Person objects found: {person_count_found}")
-                
-                # Фильтруем только людей
-                for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
-                    logging.info(f"[DETECT] Object {i}: class={cls}, conf={conf:.3f}, bbox={box}")
+            if len(results) > 0:
+                result = results[0]
+                if result.boxes is not None and len(result.boxes) > 0:
+                    boxes = result.boxes
+                    confidences = boxes.conf.cpu().numpy()
+                    class_ids = boxes.cls.cpu().numpy()
+                    xyxy = boxes.xyxy.cpu().numpy()
                     
-                    if cls == 0:  # person class
-                        logging.info(f"[DETECT] Processing person object {i}")
-                        
-                        # Фильтруем по confidence
-                        if conf < 0.5:  # Минимальный порог confidence
-                            logging.info(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
-                            continue
-                        
-                        # Проверяем на NaN значения
-                        if np.isnan(box).any():
-                            logging.info(f"[FILTER] Skipping bbox with NaN values: {box}")
-                            continue
-                        
-                        x1, y1, x2, y2 = map(int, box)
-                        
-                        # Добавляем смещение от crop области
-                        x1 += crop_offset[0]
-                        y1 += crop_offset[1]
-                        x2 += crop_offset[0]
-                        y2 += crop_offset[1]
-                        
-                        # Проверяем размер bounding box (отфильтровываем слишком маленькие)
-                        width = x2 - x1
-                        height = y2 - y1
-                        if width < 30 or height < 60:  # Минимальные размеры для человека
-                            logging.info(f"[FILTER] Skipping small bbox: {width}x{height}")
-                            continue
-                        
-                        logging.info(f"[DETECT] Adding person detection: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
-                        # Добавляем детекцию в список
-                        detections.append((x1, y1, x2, y2, conf, 0))
-                    else:
-                        logging.info(f"[FILTER] Skipping non-person object: class={cls}")
-            else:
-                logging.info("[DETECT] No objects detected in crop")
-            
-            logging.info(f"[DETECT] Final detections count: {len(detections)}")
-            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
-                logging.info(f"[DETECT] Final detection {i}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
-            
-            # Отрисовываем детекции людей
-            # Сортируем детекции по позиции (слева направо) для стабильной нумерации
-            sorted_detections = sorted(detections, key=lambda x: x[0])  # сортируем по x1 (левая координата)
-            
-            logging.info(f"[DRAW] Drawing {len(sorted_detections)} sorted detections")
-            
-            for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(sorted_detections):
-                logging.info(f"[DRAW] Drawing detection {i}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}")
-                
-                # Проверяем, находится ли человек внутри ROI
-                is_inside_roi = False
-                if pts is not None:
-                    # Проверяем центр bounding box
-                    center_x = int(x1 + (x2 - x1) // 2)
-                    center_y = int(y1 + (y2 - y1) // 2)
-                    is_inside_roi = cv2.pointPolygonTest(pts, (center_x, center_y), False) >= 0
+                    if worker_idx is not None:
+                        logging.info(f"[DETECTOR] Worker {worker_idx} found {len(xyxy)} total detections")
                     
-                    # Если центр внутри, проверяем все углы
-                    if is_inside_roi:
-                        corners = [
-                            (int(x1), int(y1)),  # top-left
-                            (int(x2), int(y1)),  # top-right
-                            (int(x2), int(y2)),  # bottom-right
-                            (int(x1), int(y2))   # bottom-left
-                        ]
+                    # Фильтруем только людей (class 0)
+                    person_indices = np.where(class_ids == 0)[0]
+                    
+                    if worker_idx is not None:
+                        logging.info(f"[DETECTOR] Worker {worker_idx} found {len(person_indices)} person detections")
+                    
+                    if len(person_indices) > 0:
+                        person_confidences = confidences[person_indices]
+                        person_boxes = xyxy[person_indices]
                         
-                        # Человек считается полностью внутри ROI только если все углы внутри
-                        is_inside_roi = all(
-                            cv2.pointPolygonTest(pts, corner, False) >= 0 
-                            for corner in corners
-                        )
-                
-                # Используем стабильные цвета на основе confidence, а не индекса
-                if is_inside_roi:
-                    if conf > 0.85:
-                        color = (0, 255, 0)  # Ярко-зеленый для высокого confidence
-                    else:
-                        color = (0, 200, 0)  # Темно-зеленый для среднего confidence
-                else:
-                    if conf > 0.85:
-                        color = (0, 165, 255)  # Оранжевый для высокого confidence
-                    else:
-                        color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
-                
-                logging.info(f"[DRAW] Detection {i}: color={color}, inside_roi={is_inside_roi}")
-                
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-                
-                # Добавляем текст с confidence
-                label = f'Person {i+1} ({conf:.2f})'
-                if is_inside_roi:
-                    label += ' (ROI)'
-                    person_count += 1
-                
-                cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-                
-                # Логируем детекции
-                logging.info(f"[DETECT] Person {i+1}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
+                        # Дополнительная фильтрация по размеру и положению
+                        filtered_indices = []
+                        for i, (x1, y1, x2, y2) in enumerate(person_boxes):
+                            box_w = x2 - x1
+                            box_h = y2 - y1
+                            aspect_ratio = box_w / box_h if box_h > 0 else 0
+                            
+                            # Проверяем размеры
+                            min_size = 20
+                            max_size = min(crop_w, crop_h) * 0.8
+                            
+                            if (box_w < min_size or box_h < min_size or 
+                                box_w > max_size or box_h > max_size):
+                                if worker_idx is not None:
+                                    logging.info(f"[DETECTOR] Worker {worker_idx} filtered out detection {i}: size {box_w:.1f}x{box_h:.1f}")
+                                continue
+                            
+                            # Проверяем aspect ratio (человек должен быть выше чем шире)
+                            if aspect_ratio > 1.5 or aspect_ratio < 0.3:
+                                if worker_idx is not None:
+                                    logging.info(f"[DETECTOR] Worker {worker_idx} filtered out detection {i}: aspect ratio {aspect_ratio:.2f}")
+                                continue
+                            
+                            # Проверяем расстояние от краев (не слишком близко к краям)
+                            margin = 10
+                            if (x1 < margin or y1 < margin or 
+                                x2 > crop_w - margin or y2 > crop_h - margin):
+                                if worker_idx is not None:
+                                    logging.info(f"[DETECTOR] Worker {worker_idx} filtered out detection {i}: too close to edges")
+                                continue
+                            
+                            filtered_indices.append(i)
+                        
+                        if worker_idx is not None:
+                            logging.info(f"[DETECTOR] Worker {worker_idx} after filtering: {len(filtered_indices)} detections")
+                        
+                        # Сортируем по x-координате для стабильности ID
+                        if filtered_indices:
+                            filtered_indices.sort(key=lambda i: person_boxes[i][0])
+                        
+                        # Рисуем отфильтрованные детекции
+                        for i, idx in enumerate(filtered_indices):
+                            x1, y1, x2, y2 = person_boxes[idx]
+                            conf = person_confidences[idx]
+                            
+                            # Конвертируем в int для OpenCV
+                            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                            
+                            # Проверяем, находится ли человек внутри ROI
+                            is_inside_roi = True
+                            if pts is not None:
+                                # Проверяем все четыре угла bounding box
+                                corners = [
+                                    (int(x1), int(y1)),   # top-left
+                                    (int(x2), int(y1)),   # top-right
+                                    (int(x2), int(y2)),   # bottom-right
+                                    (int(x1), int(y2))   # bottom-left
+                                ]
+                                
+                                # Человек считается полностью внутри ROI только если все углы внутри
+                                is_inside_roi = all(
+                                    cv2.pointPolygonTest(pts, corner, False) >= 0 
+                                    for corner in corners
+                                )
+                        
+                        # Используем стабильные цвета на основе confidence, а не индекса
+                        if is_inside_roi:
+                            if conf > 0.85:
+                                color = (0, 255, 0)  # Ярко-зеленый для высокого confidence
+                            else:
+                                color = (0, 200, 0)  # Темно-зеленый для среднего confidence
+                        else:
+                            if conf > 0.85:
+                                color = (0, 165, 255)  # Оранжевый для высокого confidence
+                            else:
+                                color = (0, 100, 255)  # Темно-оранжевый для среднего confidence
+                        
+                        if worker_idx is not None:
+                            logging.info(f"[DETECTOR] Worker {worker_idx} drawing detection {i}: color={color}, inside_roi={is_inside_roi}")
+                        
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                        
+                        # Добавляем текст с confidence
+                        label = f'Person {i+1} ({conf:.2f})'
+                        if is_inside_roi:
+                            label += ' (ROI)'
+                            person_count += 1
+                        
+                        cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                        
+                        # Логируем детекции
+                        if worker_idx is not None:
+                            logging.info(f"[DETECTOR] Worker {worker_idx} Person {i+1}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
             
             t2 = time.time()
             # Рисуем ROI красными линиями
@@ -359,10 +378,12 @@ class MultiprocessPersonDetector:
             except pyqueue.Empty:
                 continue
             try:
-                result = detector.detect(frame, roi=roi)
+                logging.info(f"[MP_WORKER] Worker {worker_idx} processing frame {idx}")
+                result = detector.detect(frame, roi=roi, worker_idx=worker_idx)
                 output_queue.put((idx, result))
+                logging.info(f"[MP_WORKER] Worker {worker_idx} completed frame {idx}")
             except Exception as e:
-                logging.error(f"[MP_WORKER] Error: {e}")
+                logging.error(f"[MP_WORKER] Worker {worker_idx} error: {e}")
                 output_queue.put((idx, b''))
 
     def detect(self, frame, roi=None):
