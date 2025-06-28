@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y \
     pkg-config
 
 # Создать новое окружение с python=3.10
-RUN conda create -y -n people python=3.10 && \
-    echo "conda activate people" >> ~/.bashrc
+RUN conda create -y -n people python=3.10
+
+# Инициализировать conda для bash
+RUN conda init bash
 
 # Использовать bash как shell для активации окружения
 SHELL ["/bin/bash", "-c"]
