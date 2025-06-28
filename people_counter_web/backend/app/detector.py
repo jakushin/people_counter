@@ -206,6 +206,47 @@ class PersonDetector:
                         if worker_idx is not None:
                             logging.info(f"[DETECTOR] Worker {worker_idx} after filtering: {len(filtered_indices)} detections")
                         
+                        # Применяем NMS для удаления перекрывающихся bounding box
+                        if len(filtered_indices) > 1:
+                            # Подготавливаем данные для NMS
+                            boxes_for_nms = []
+                            scores_for_nms = []
+                            indices_for_nms = []
+                            
+                            for i, idx in enumerate(filtered_indices):
+                                x1, y1, x2, y2 = person_boxes[idx]
+                                conf = person_confidences[idx]
+                                boxes_for_nms.append([x1, y1, x2, y2])
+                                scores_for_nms.append(conf)
+                                indices_for_nms.append(idx)
+                            
+                            # Применяем NMS
+                            boxes_for_nms = np.array(boxes_for_nms, dtype=np.float32)
+                            scores_for_nms = np.array(scores_for_nms, dtype=np.float32)
+                            
+                            # Используем OpenCV NMS
+                            nms_indices = cv2.dnn.NMSBoxes(
+                                boxes_for_nms.tolist(), 
+                                scores_for_nms.tolist(), 
+                                score_threshold=0.5, 
+                                nms_threshold=0.3
+                            )
+                            
+                            if len(nms_indices) > 0:
+                                # Получаем индексы после NMS
+                                nms_indices = nms_indices.flatten()
+                                filtered_indices = [indices_for_nms[i] for i in nms_indices]
+                                
+                                if worker_idx is not None:
+                                    logging.info(f"[DETECTOR] Worker {worker_idx} after NMS: {len(filtered_indices)} detections")
+                            else:
+                                # Если NMS удалил все детекции, оставляем только лучшую
+                                best_idx = np.argmax(scores_for_nms)
+                                filtered_indices = [indices_for_nms[best_idx]]
+                                
+                                if worker_idx is not None:
+                                    logging.info(f"[DETECTOR] Worker {worker_idx} NMS removed all, keeping best: {len(filtered_indices)} detection")
+                        
                         # Сортируем по x-координате для стабильности ID
                         if filtered_indices:
                             filtered_indices.sort(key=lambda i: person_boxes[i][0])
