@@ -69,8 +69,8 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8n.pt для детекции людей
-                self.model = YOLO('yolov8n.pt')
+                # Используем yolov8m.pt для детекции людей
+                self.model = YOLO('yolov8m.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
@@ -123,7 +123,7 @@ class PersonDetector:
                 logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             
             with suppress_all_output():
-                results = self.model(crop_frame, imgsz=imgsz, conf=0.4)
+                results = self.model(crop_frame, imgsz=imgsz, conf=0.5, iou=0.5, verbose=False)
             t1 = time.time()
             annotated = frame.copy()
             person_count = 0
@@ -140,6 +140,11 @@ class PersonDetector:
                 
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
+                        # Фильтруем по confidence
+                        if conf < 0.5:  # Минимальный порог confidence
+                            verbose_log(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
+                            continue
+                        
                         # Проверяем на NaN значения
                         if np.isnan(box).any():
                             verbose_log(f"[FILTER] Skipping bbox with NaN values: {box}")
