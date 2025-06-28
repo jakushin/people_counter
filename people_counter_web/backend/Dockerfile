@@ -11,24 +11,19 @@ RUN apt-get update && apt-get install -y \
     cmake \
     pkg-config
 
-# Создать новое окружение с python=3.10
-RUN conda create -y -n people python=3.10
-
-# Инициализировать conda и установить зависимости в одном блоке
-RUN conda init bash && \
+# Создать окружение и установить все зависимости в одном блоке
+RUN conda create -y -n people python=3.10 && \
+    conda init bash && \
     . ~/.bashrc && \
     conda activate people && \
     conda install -y -c conda-forge ffmpeg opencv numpy && \
     conda install -y -c pytorch pytorch torchvision cpuonly && \
-    pip install ultralytics fastapi uvicorn psutil
+    pip install ultralytics fastapi uvicorn psutil && \
+    python -c "import cv2, numpy, ultralytics, torch, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__); print('PyTorch', torch.__version__)" && \
+    ffmpeg -version | head -1
 
 # Использовать bash как shell для активации окружения
 SHELL ["/bin/bash", "-c"]
-
-# Вывести версии основных библиотек
-RUN conda activate people && \
-    python -c "import cv2, numpy, ultralytics, torch, sys; print('Python', sys.version); print('OpenCV', cv2.__version__); print('Numpy', numpy.__version__); print('Ultralytics', ultralytics.__version__); print('PyTorch', torch.__version__)" && \
-    ffmpeg -version | head -1
 
 COPY requirements.txt .
 RUN conda activate people && pip install --no-cache-dir -r requirements.txt
