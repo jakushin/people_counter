@@ -11,6 +11,7 @@ import threading
 import psutil
 from multiprocessing import Process, Queue, cpu_count
 import queue as pyqueue
+from byte_tracker import ByteTrackerWrapper, TrackedPerson
 
 # Настройка уровней логирования
 DEBUG_MODE = os.environ.get('DEBUG_MODE', 'false').lower() == 'true'
@@ -73,6 +74,9 @@ class PersonDetector:
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
+        
+        # Инициализируем трекер
+        self.tracker = ByteTrackerWrapper(track_thresh=0.5, track_buffer=30, match_thresh=0.8)
 
     def detect(self, frame, roi=None):
         try:
@@ -117,10 +121,14 @@ class PersonDetector:
             t1 = time.time()
             annotated = frame.copy()
             person_count = 0
+            
+            # Подготавливаем детекции для ByteTrack
+            detections = []
             if results and results[0].boxes is not None and len(results[0].boxes) > 0:
                 boxes = results[0].boxes.xyxy.cpu().numpy()
                 clss = results[0].boxes.cls.cpu().numpy()
                 confs = results[0].boxes.conf.cpu().numpy()
+                
                 # Логируем обнаружение объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] Found {len(boxes)} objects, classes: {clss}, confidences: {confs}")
                 
@@ -135,7 +143,6 @@ class PersonDetector:
                         y2 += int(crop_offset[1])
                         
                         bbox_w, bbox_h = x2 - x1, y2 - y1
-                        cx, cy = x1 + bbox_w // 2, y1 + bbox_h // 2
                         
                         # Фильтрация по размеру
                         min_size, max_size = 30, 400
@@ -143,37 +150,36 @@ class PersonDetector:
                             verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
                             continue
                         
-                        # Проверка ROI - проверяем все 4 угла bounding box
-                        if pts is not None:
-                            # Проверяем все 4 угла bounding box
-                            corners = [
-                                (int(x1), int(y1)),  # левый верхний
-                                (int(x2), int(y1)),  # правый верхний  
-                                (int(x2), int(y2)),  # правый нижний
-                                (int(x1), int(y2))   # левый нижний
-                            ]
-                            
-                            # Проверяем, что все углы находятся внутри ROI
-                            all_inside = True
-                            for corner_x, corner_y in corners:
-                                if cv2.pointPolygonTest(pts, (corner_x, corner_y), False) < 0:
-                                    all_inside = False
-                                    break
-                            
-                            if not all_inside:
-                                verbose_log(f"[ROI] Person not fully inside ROI, skipping (corners: {corners})")
-                                continue
-                        
-                        person_count += 1
-                        # Логируем обнаружение людей всегда, так как это важно для диагностики
-                        logging.info(f"[DETECT] Person {person_count}: bbox=({x1},{y1},{x2},{y2}), size={bbox_w}x{bbox_h}, center=({cx},{cy}), conf={conf:.3f}")
-                        
-                        # Рисуем bounding box
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.putText(annotated, f'Person {person_count}', (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                        # Добавляем детекцию в список для трекера
+                        detections.append((x1, y1, x2, y2, conf, 0))  # 0 = person class
             else:
                 # Логируем отсутствие объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] No objects detected in crop")
+            
+            # Обновляем трекер ByteTrack
+            tracked_persons = self.tracker.update(detections, pts)
+            
+            # Отрисовываем трекированные люди
+            for tracked_person in tracked_persons:
+                x1, y1, x2, y2 = tracked_person.bbox
+                track_id = tracked_person.track_id
+                conf = tracked_person.confidence
+                is_inside_roi = tracked_person.is_inside_roi
+                
+                # Рисуем bounding box с цветом в зависимости от нахождения в ROI
+                color = (0, 255, 0) if is_inside_roi else (0, 165, 255)  # Зеленый если внутри ROI, оранжевый если снаружи
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+                
+                # Добавляем текст с ID трека
+                label = f'Person {track_id}'
+                if is_inside_roi:
+                    label += ' (ROI)'
+                    person_count += 1
+                
+                cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                
+                # Логируем трекированные люди
+                logging.info(f"[TRACK] Person {track_id}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
             
             t2 = time.time()
             # Рисуем ROI красными линиями

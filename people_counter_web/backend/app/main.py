@@ -397,7 +397,9 @@ async def websocket_endpoint(
                         'imgsz': imgsz,
                         'frame_count': frame_count,
                         'source_type': source_type,
-                        'detect_time': round(detect_time, 3)
+                        'detect_time': round(detect_time, 3),
+                        'tracking_enabled': True,
+                        'tracker_type': 'ByteTrack'
                     }
                     await websocket.send_text(json.dumps(metadata))
                     

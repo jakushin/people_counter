@@ -47,7 +47,7 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 150); // Увеличиваем высоту для видео информации
+  ctx.fillRect(w-180, 0, 180, 170); // Увеличиваем высоту для информации о трекинге
   ctx.globalAlpha = 1.0;
   ctx.fillStyle = '#0f0';
   ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
@@ -61,10 +61,16 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, 97);
   ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, 112);
   
+  // Добавляем информацию о трекинге
+  if (stats.tracking_enabled) {
+    ctx.fillStyle = '#00ffff';
+    ctx.fillText('Трекинг: ' + (stats.tracker_type || 'ByteTrack'), w-10, 127);
+  }
+  
   // Добавляем информацию о видео
   if (currentVideo) {
     ctx.fillStyle = '#ffa500';
-    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, 127);
+    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, 142);
   }
   ctx.restore();
 }
