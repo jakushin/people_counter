@@ -72,17 +72,16 @@ def get_video_files() -> List[str]:
     try:
         if not os.path.exists(VIDEOS_DIR):
             os.makedirs(VIDEOS_DIR, exist_ok=True)
-        # Показываем только конвертированные файлы и убираем префикс converted_
+        # Показываем только конвертированные файлы (без префикса tmp_)
         files = []
         all_files = os.listdir(VIDEOS_DIR)
         logging.info(f'[API] All files in directory: {all_files}')
         
         for f in all_files:
-            if f.startswith('converted_') and f.lower().endswith('.mp4'):
-                # Убираем префикс converted_ для отображения
-                original_name = f[10:]  # убираем 'converted_'
-                files.append(original_name)
-                logging.info(f'[API] Added video file: {original_name} (from {f})')
+            # Показываем только файлы .mp4, которые НЕ начинаются с tmp_
+            if f.lower().endswith('.mp4') and not f.startswith('tmp_'):
+                files.append(f)
+                logging.info(f'[API] Added video file: {f}')
         
         result = sorted(files)
         logging.info(f'[API] Final video list: {result}')
@@ -115,11 +114,10 @@ def start_video_stream(video_filename: str) -> bool:
         logging.error(f'[API] FFmpeg check failed: {e}')
         return False
     
-    # Проверяем существование конвертированного файла
-    converted_filename = f"converted_{video_filename}"
-    converted_path = os.path.join(VIDEOS_DIR, converted_filename)
+    # Проверяем существование конвертированного файла (без префикса)
+    video_path = os.path.join(VIDEOS_DIR, video_filename)
     
-    logging.info(f'[API] Looking for converted file: {converted_path}')
+    logging.info(f'[API] Looking for video file: {video_path}')
     
     # Проверяем, что есть в папке
     try:
@@ -127,34 +125,26 @@ def start_video_stream(video_filename: str) -> bool:
         logging.info(f'[API] Files in videos directory: {all_files}')
         
         # Ищем файл по точному совпадению
-        found_file = None
-        for file in all_files:
-            if file == converted_filename:
-                found_file = file
-                break
-        
-        if found_file is None:
-            logging.error(f'[API] Converted video file not found: {converted_filename}')
+        if video_filename not in all_files:
+            logging.error(f'[API] Video file not found: {video_filename}')
             return False
             
-        # Используем найденный файл
-        actual_path = os.path.join(VIDEOS_DIR, found_file)
-        logging.info(f'[API] Found file: {actual_path}')
+        logging.info(f'[API] Found file: {video_path}')
         
     except Exception as e:
         logging.error(f'[API] Cannot list directory: {e}')
         return False
     
-    file_size = os.path.getsize(actual_path)
-    logging.info(f'[API] Converted video file exists: {found_file}, size: {file_size} bytes')
+    file_size = os.path.getsize(video_path)
+    logging.info(f'[API] Video file exists: {video_filename}, size: {file_size} bytes')
     
     # Проверяем, что файл не пустой
     if file_size == 0:
-        logging.error(f'[API] Converted video file is empty: {actual_path}')
+        logging.error(f'[API] Video file is empty: {video_path}')
         return False
     
-    current_video_file = found_file
-    logging.info(f'[API] Video stream started successfully: {found_file}')
+    current_video_file = video_filename
+    logging.info(f'[API] Video stream started successfully: {video_filename}')
     return True
 
 @app.get("/")
@@ -177,20 +167,20 @@ async def upload_video(file: UploadFile = File(...)):
         # Создать папку если не существует
         os.makedirs(VIDEOS_DIR, exist_ok=True)
         
-        # Сохранить оригинальный файл
-        original_path = os.path.join(VIDEOS_DIR, file.filename)
-        with open(original_path, "wb") as buffer:
+        # Сохранить оригинальный файл с префиксом tmp_
+        tmp_filename = f"tmp_{file.filename}"
+        tmp_path = os.path.join(VIDEOS_DIR, tmp_filename)
+        with open(tmp_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
         
-        logging.info(f'[API] Original video uploaded: {file.filename}')
+        logging.info(f'[API] Original video uploaded as: {tmp_filename}')
         
-        # Конвертируем в нужный формат сразу при загрузке
-        converted_filename = f"converted_{file.filename}"
-        converted_path = os.path.join(VIDEOS_DIR, converted_filename)
+        # Конвертируем в нужный формат с оригинальным именем
+        converted_path = os.path.join(VIDEOS_DIR, file.filename)
         
         cmd = [
             'ffmpeg',
-            '-i', original_path,
+            '-i', tmp_path,
             '-vf', 'scale=1280:960,fps=10',  # конвертация в нужный формат
             '-c:v', 'libx264',  # кодек
             '-preset', 'ultrafast',  # быстрый пресет
@@ -204,20 +194,20 @@ async def upload_video(file: UploadFile = File(...)):
         if result.returncode != 0:
             logging.error(f'[API] FFmpeg conversion failed. Return code: {result.returncode}')
             logging.error(f'[API] FFmpeg stderr: {result.stderr}')
-            # Удаляем оригинальный файл если конвертация не удалась
-            os.remove(original_path)
+            # Удаляем временный файл если конвертация не удалась
+            os.remove(tmp_path)
             raise HTTPException(status_code=500, detail="Failed to convert video")
         
-        logging.info(f'[API] Video converted successfully: {converted_filename}')
+        logging.info(f'[API] Video converted successfully: {file.filename}')
         
-        # Удаляем оригинальный файл после успешной конвертации
+        # Удаляем временный файл после успешной конвертации
         try:
-            os.remove(original_path)
-            logging.info(f'[API] Original file removed: {file.filename}')
+            os.remove(tmp_path)
+            logging.info(f'[API] Temporary file removed: {tmp_filename}')
         except Exception as e:
-            logging.warning(f'[API] Failed to remove original file: {e}')
+            logging.warning(f'[API] Failed to remove temporary file: {e}')
         
-        return {"message": "Video uploaded and converted successfully", "filename": file.filename, "converted_filename": converted_filename}
+        return {"message": "Video uploaded and converted successfully", "filename": file.filename}
         
     except Exception as e:
         logging.error(f'[API] Error uploading video: {e}', exc_info=True)
@@ -228,7 +218,8 @@ def start_video(video_filename: str = Query(...)):
     """Запустить видео как RTSP поток"""
     global current_video_file
     
-    if not os.path.exists(os.path.join(VIDEOS_DIR, video_filename)):
+    video_path = os.path.join(VIDEOS_DIR, video_filename)
+    if not os.path.exists(video_path):
         raise HTTPException(status_code=404, detail="Video file not found")
     
     logging.info(f'[API] Starting video: {video_filename}')
