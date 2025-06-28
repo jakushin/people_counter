@@ -69,14 +69,14 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8m.pt для детекции людей
-                self.model = YOLO('yolov8m.pt')
+                # Используем yolov8s.pt для детекции людей
+                self.model = YOLO('yolov8s.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
         
         # Инициализируем YOLO модель
-        self.model = YOLO('yolov8n.pt')
+        self.model = YOLO('yolov8s.pt')
         
         # Инициализируем трекер ByteTrack
         # self.tracker = ByteTrackerWrapper()
@@ -123,7 +123,7 @@ class PersonDetector:
                 logging.info(f"[DETECT] [PersonDetector] PID: {pid}, Thread ID: {thread_id}, torch.get_num_threads(): {torch.get_num_threads()}, torch.get_num_interop_threads(): {torch.get_num_interop_threads()}, CPU: {cpu_percent}%, CPU per core: {cpu_per_core}, RSS: {proc_mem:.1f} MB, System RAM: {mem.percent}%")
             
             with suppress_all_output():
-                results = self.model(crop_frame, imgsz=imgsz, conf=0.5, iou=0.5, verbose=False)
+                results = self.model(crop_frame, imgsz=imgsz, conf=0.7, iou=0.7, verbose=False, max_det=10)
             t1 = time.time()
             annotated = frame.copy()
             person_count = 0
@@ -141,7 +141,7 @@ class PersonDetector:
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
                         # Фильтруем по confidence
-                        if conf < 0.5:  # Минимальный порог confidence
+                        if conf < 0.7:  # Минимальный порог confidence
                             verbose_log(f"[FILTER] Skipping low confidence detection: {conf:.3f}")
                             continue
                         
@@ -172,8 +172,7 @@ class PersonDetector:
                 # Логируем отсутствие объектов всегда, так как это важно для диагностики
                 logging.info(f"[DETECT] No objects detected in crop")
             
-            # Временно отключаем трекинг для диагностики
-            tracked_persons = []
+            # Отрисовываем детекции людей
             for i, (x1, y1, x2, y2, conf, cls_id) in enumerate(detections):
                 # Проверяем, находится ли человек внутри ROI
                 is_inside_roi = False
@@ -198,36 +197,20 @@ class PersonDetector:
                             for corner in corners
                         )
                 
-                tracked_person = type('TrackedPerson', (), {
-                    'track_id': i,
-                    'bbox': (x1, y1, x2, y2),
-                    'confidence': conf,
-                    'class_id': cls_id,
-                    'is_inside_roi': is_inside_roi
-                })()
-                tracked_persons.append(tracked_person)
-            
-            # Отрисовываем трекированные люди
-            for tracked_person in tracked_persons:
-                x1, y1, x2, y2 = tracked_person.bbox
-                track_id = tracked_person.track_id
-                conf = tracked_person.confidence
-                is_inside_roi = tracked_person.is_inside_roi
-                
                 # Рисуем bounding box с цветом в зависимости от нахождения в ROI
                 color = (0, 255, 0) if is_inside_roi else (0, 165, 255)  # Зеленый если внутри ROI, оранжевый если снаружи
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
                 
-                # Добавляем текст с ID трека
-                label = f'Person {track_id}'
+                # Добавляем текст с confidence
+                label = f'Person {i+1} ({conf:.2f})'
                 if is_inside_roi:
                     label += ' (ROI)'
                     person_count += 1
                 
                 cv2.putText(annotated, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
                 
-                # Логируем трекированные люди
-                logging.info(f"[TRACK] Person {track_id}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
+                # Логируем детекции
+                logging.info(f"[DETECT] Person {i+1}: bbox=({x1},{y1},{x2},{y2}), conf={conf:.3f}, inside_roi={is_inside_roi}")
             
             t2 = time.time()
             # Рисуем ROI красными линиями
