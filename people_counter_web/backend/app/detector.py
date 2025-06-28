@@ -140,6 +140,11 @@ class PersonDetector:
                 
                 for i, (box, cls, conf) in enumerate(zip(boxes, clss, confs)):
                     if cls == 0:  # person class
+                        # Проверяем на NaN значения
+                        if np.isnan(box).any():
+                            verbose_log(f"[FILTER] Skipping bbox with NaN values: {box}")
+                            continue
+                        
                         x1, y1, x2, y2 = map(int, box)
                         
                         # Добавляем смещение от crop к координатам в оригинальном кадре
