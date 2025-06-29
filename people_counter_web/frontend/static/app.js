@@ -190,11 +190,6 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, y);
   y += lineHeight;
   
-  // Время детекции
-  ctx.fillStyle = '#ff6348';
-  ctx.fillText('Detect: ' + (stats.detect_time || '-') + 's', w-10, y);
-  y += lineHeight;
-  
   // Информация о видео
   if (currentVideo) {
     ctx.fillStyle = '#ffa500';
@@ -385,42 +380,55 @@ function connectWS() {
   };
   ws.onmessage = function(event) {
     if (event.data instanceof ArrayBuffer) {
-      // Это JPEG изображение
-      const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const img = new window.Image();
+      // Получение изображения
+      const arrayBuffer = event.data;
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const blob = new Blob([uint8Array], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      
+      const img = new Image();
       img.onload = function() {
         lastImg = img;
         lastImgW = img.width;
         lastImgH = img.height;
-        // Если есть pendingRoi — применяем его
-        if (pendingRoi) {
-          roiPoints = pendingRoi;
-          pendingRoi = null;
-          roiReceivedFromBackend = true;
-          drawRoi();
-          updateFit();
-        } else if (!roiPoints) {
-          // Ждём ROI от backend 500 мс, если не пришёл — fallback
-          setTimeout(() => {
-            if (!roiPoints && !roiReceivedFromBackend) {
-              roiPoints = getDefaultRoiPoints(img.width, img.height);
-              drawRoi();
-            }
-          }, 500);
-        }
-        updateFit();
+        fitAndDrawImage(img);
+        URL.revokeObjectURL(url);
       };
       img.onerror = function() {
-        setStatus('Ошибка декодирования изображения', true);
+        console.error('Failed to load image');
         lastStats.status = 'Ошибка декодирования';
-        if (lastImg) updateFit();
       };
-      img.src = URL.createObjectURL(blob);
+      img.src = url;
     } else {
-      // Это JSON статистика
+      // Получение метаданных
       try {
         const stats = JSON.parse(event.data);
-        console.log('Received stats:', stats);
+        
+        // Дебаг логи для диагностики проблемы с обновлением
+        const now = Date.now();
+        if (!window.lastStatsUpdate) {
+          window.lastStatsUpdate = now;
+          window.statsUpdateCount = 0;
+        }
+        
+        window.statsUpdateCount++;
+        const timeSinceLastUpdate = now - window.lastStatsUpdate;
+        
+        // Логируем каждые 10 обновлений или каждые 5 секунд
+        if (window.statsUpdateCount % 10 === 0 || timeSinceLastUpdate > 5000) {
+          console.log(`[DEBUG] Stats update #${window.statsUpdateCount}:`, {
+            timestamp: stats.timestamp,
+            timeSinceLastUpdate: timeSinceLastUpdate + 'ms',
+            updateRate: (window.statsUpdateCount / (timeSinceLastUpdate / 1000)).toFixed(2) + ' updates/sec',
+            cpu_all: stats.cpu_all,
+            mem_percent: stats.mem_percent,
+            fps: stats.fps,
+            frame_count: stats.frame_count
+          });
+          window.lastStatsUpdate = now;
+          window.statsUpdateCount = 0;
+        }
+        
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
           roiReceivedFromBackend = true;

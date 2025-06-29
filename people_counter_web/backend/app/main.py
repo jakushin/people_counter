@@ -383,6 +383,9 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Отправляем статистику каждые 4 секунды (более плавно)
                 if now - last_stat_time >= 4.0:
+                    # Дебаг логи для диагностики
+                    debug_log(f'[DEBUG] Sending stats update: time_since_last={now - last_stat_time:.1f}s, frame_count={frame_count}')
+                    
                     # CPU информация
                     cpu_percent = round(psutil.cpu_percent(interval=None))
                     cpu_per_core = [round(x) for x in psutil.cpu_percent(interval=None, percpu=True)]
@@ -517,6 +520,9 @@ async def websocket_endpoint(websocket: WebSocket):
                         last_stat_time = now
                         # Логируем статистику всегда, так как она важна для диагностики
                         logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={avg_disk_percent}%')
+                    
+                    # Дебаг логи для диагностики
+                    debug_log(f'[DEBUG] Metrics calculated: history_size={len(stream._metrics_history)}, avg_cpu={avg_cpu_all}%, avg_mem={avg_mem_percent}%')
                 
                 # Отправляем кадр клиенту
                 try:
@@ -550,9 +556,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         'crop_w': crop_w,
                         'imgsz': imgsz,
                         'frame_count': frame_count,
-                        'source_type': source_type,
-                        'detect_time': round(detect_time, 3)
+                        'source_type': source_type
                     }
+                    
+                    # Дебаг логи для диагностики отправки
+                    debug_log(f'[DEBUG] Sending metadata: frame_count={frame_count}, metadata_size={len(str(metadata))} chars')
+                    
                     await websocket.send_text(json.dumps(metadata))
                     
                     # Проверяем состояние перед отправкой изображения
