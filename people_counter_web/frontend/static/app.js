@@ -409,22 +409,63 @@ function connectWS() {
         if (!window.lastStatsUpdate) {
           window.lastStatsUpdate = now;
           window.statsUpdateCount = 0;
+          window.statsHistory = [];
         }
         
         window.statsUpdateCount++;
         const timeSinceLastUpdate = now - window.lastStatsUpdate;
         
+        // Сохраняем историю обновлений для анализа
+        window.statsHistory.push({
+          timestamp: now,
+          cpu_all: stats.cpu_all,
+          mem_percent: stats.mem_percent,
+          fps: stats.fps,
+          frame_count: stats.frame_count
+        });
+        
+        // Оставляем только последние 50 обновлений
+        if (window.statsHistory.length > 50) {
+          window.statsHistory.shift();
+        }
+        
         // Логируем каждые 10 обновлений или каждые 5 секунд
         if (window.statsUpdateCount % 10 === 0 || timeSinceLastUpdate > 5000) {
+          const avgUpdateRate = window.statsHistory.length > 1 ? 
+            (window.statsHistory.length - 1) / ((now - window.statsHistory[0].timestamp) / 1000) : 0;
+          
           console.log(`[DEBUG] Stats update #${window.statsUpdateCount}:`, {
             timestamp: stats.timestamp,
             timeSinceLastUpdate: timeSinceLastUpdate + 'ms',
             updateRate: (window.statsUpdateCount / (timeSinceLastUpdate / 1000)).toFixed(2) + ' updates/sec',
+            avgUpdateRate: avgUpdateRate.toFixed(2) + ' updates/sec',
+            historySize: window.statsHistory.length,
             cpu_all: stats.cpu_all,
             mem_percent: stats.mem_percent,
             fps: stats.fps,
             frame_count: stats.frame_count
           });
+          
+          // Анализируем частоту обновлений
+          if (window.statsHistory.length > 10) {
+            const recentUpdates = window.statsHistory.slice(-10);
+            const intervals = [];
+            for (let i = 1; i < recentUpdates.length; i++) {
+              intervals.push(recentUpdates[i].timestamp - recentUpdates[i-1].timestamp);
+            }
+            const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+            const minInterval = Math.min(...intervals);
+            const maxInterval = Math.max(...intervals);
+            
+            console.log(`[DEBUG] Update intervals analysis:`, {
+              avgInterval: avgInterval.toFixed(0) + 'ms',
+              minInterval: minInterval + 'ms',
+              maxInterval: maxInterval + 'ms',
+              variance: intervals.length > 1 ? 
+                (intervals.reduce((a, b) => a + Math.pow(b - avgInterval, 2), 0) / (intervals.length - 1)).toFixed(0) + 'ms²' : 'N/A'
+            });
+          }
+          
           window.lastStatsUpdate = now;
           window.statsUpdateCount = 0;
         }

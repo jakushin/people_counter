@@ -317,7 +317,8 @@ class MultiprocessPersonDetector:
         
         while True:
             try:
-                out_idx, result = self.output_queue.get(timeout=2)
+                # Увеличиваем таймаут с 2 до 10 секунд для избежания частых таймаутов
+                out_idx, result = self.output_queue.get(timeout=10)
                 self.result_buffer[out_idx] = result
                 # Логируем получение результатов всегда, так как это важно для диагностики
                 logging.info(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
@@ -331,6 +332,13 @@ class MultiprocessPersonDetector:
                 logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")
                 active_workers = sum(1 for w in self.workers if w.is_alive())
                 logging.warning(f"[MP_WORKERS] Active workers: {active_workers}/{len(self.workers)}")
+                
+                # Добавляем больше информации о состоянии очередей при таймауте
+                input_size = self.input_queue.qsize()
+                output_size = self.output_queue.qsize()
+                buffer_size = len(self.result_buffer)
+                logging.warning(f"[MP_TIMEOUT] Queue status - Input: {input_size}, Output: {output_size}, Buffer: {buffer_size}")
+                
                 return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
     def _create_empty_frame(self, shape):

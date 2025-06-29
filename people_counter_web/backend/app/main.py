@@ -325,6 +325,21 @@ async def websocket_endpoint(websocket: WebSocket):
     last_send_time = time.time()
     frame_count = 0
     
+    # Инициализируем переменные метрик
+    avg_cpu_cores = []
+    avg_disk_percent = 0
+    avg_read_speed = 0
+    avg_write_speed = 0
+    avg_read_latency = 0
+    avg_write_latency = 0
+    avg_net_sent_mbps = 0
+    avg_net_recv_mbps = 0
+    mem_total_gb = 0
+    mem_used_gb = 0
+    mem_available_gb = 0
+    disk_total_gb = 0
+    disk_used_gb = 0
+    
     try:
         debug_log(f'[WS] Creating VideoStream for: {rtsp_url}')
         stream = VideoStream(rtsp_url)
@@ -514,12 +529,13 @@ async def websocket_endpoint(websocket: WebSocket):
                         avg_net_sent_mbps = net_sent_mbps
                         avg_net_recv_mbps = net_recv_mbps
                     
-                    if abs(avg_cpu_all - last_cpu) > 5 or abs(avg_mem_percent - last_mem) > 5:
-                        last_cpu = avg_cpu_all
-                        last_mem = avg_mem_percent
-                        last_stat_time = now
-                        # Логируем статистику всегда, так как она важна для диагностики
-                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={avg_disk_percent}%')
+                    # Всегда обновляем значения и время (убираем условие с порогом 5%)
+                    last_cpu = avg_cpu_all
+                    last_mem = avg_mem_percent
+                    last_stat_time = now
+                    
+                    # Логируем статистику всегда, так как она важна для диагностики
+                    logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={avg_disk_percent}%')
                     
                     # Дебаг логи для диагностики
                     debug_log(f'[DEBUG] Metrics calculated: history_size={len(stream._metrics_history)}, avg_cpu={avg_cpu_all}%, avg_mem={avg_mem_percent}%')
@@ -537,20 +553,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         'fps': stats['fps'],
                         'shape': stats['shape'],
                         'cpu_all': last_cpu,
-                        'cpu_cores': avg_cpu_cores if 'avg_cpu_cores' in locals() else [],
+                        'cpu_cores': avg_cpu_cores,
                         'mem_percent': last_mem,
-                        'mem_total_gb': mem_total_gb if 'mem_total_gb' in locals() else None,
-                        'mem_used_gb': mem_used_gb if 'mem_used_gb' in locals() else None,
-                        'mem_available_gb': mem_available_gb if 'mem_available_gb' in locals() else None,
-                        'disk_percent': avg_disk_percent if 'avg_disk_percent' in locals() else None,
-                        'disk_total_gb': disk_total_gb if 'disk_total_gb' in locals() else None,
-                        'disk_used_gb': disk_used_gb if 'disk_used_gb' in locals() else None,
-                        'disk_read_speed': avg_read_speed if 'avg_read_speed' in locals() else 0,
-                        'disk_write_speed': avg_write_speed if 'avg_write_speed' in locals() else 0,
-                        'disk_read_latency': avg_read_latency if 'avg_read_latency' in locals() else 0,
-                        'disk_write_latency': avg_write_latency if 'avg_write_latency' in locals() else 0,
-                        'net_sent_mbps': avg_net_sent_mbps if 'avg_net_sent_mbps' in locals() else None,
-                        'net_recv_mbps': avg_net_recv_mbps if 'avg_net_recv_mbps' in locals() else None,
+                        'mem_total_gb': mem_total_gb,
+                        'mem_used_gb': mem_used_gb,
+                        'mem_available_gb': mem_available_gb,
+                        'disk_percent': avg_disk_percent,
+                        'disk_total_gb': disk_total_gb,
+                        'disk_used_gb': disk_used_gb,
+                        'disk_read_speed': avg_read_speed,
+                        'disk_write_speed': avg_write_speed,
+                        'disk_read_latency': avg_read_latency,
+                        'disk_write_latency': avg_write_latency,
+                        'net_sent_mbps': avg_net_sent_mbps,
+                        'net_recv_mbps': avg_net_recv_mbps,
                         'status': 'ok',
                         'crop_h': crop_h,
                         'crop_w': crop_w,
