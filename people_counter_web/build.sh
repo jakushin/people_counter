@@ -5,20 +5,34 @@
 
 echo "🚀 Начинаем обновление и пересборку..."
 
-# Проверяем, что мы в корневой директории проекта
+# Проверяем, что мы в директории с docker-compose.yml
 if [ ! -f "docker-compose.yml" ]; then
     echo "❌ Ошибка: Необходимо запустить скрипт из директории с docker-compose.yml"
     exit 1
 fi
 
-# Проверяем, что git репозиторий существует
-if [ ! -d ".git" ]; then
-    echo "❌ Ошибка: Не найден git репозиторий"
+# Находим git репозиторий (может быть в родительских директориях)
+GIT_ROOT=""
+CURRENT_DIR=$(pwd)
+
+while [ "$CURRENT_DIR" != "/" ]; do
+    if [ -d "$CURRENT_DIR/.git" ]; then
+        GIT_ROOT="$CURRENT_DIR"
+        break
+    fi
+    CURRENT_DIR=$(dirname "$CURRENT_DIR")
+done
+
+if [ -z "$GIT_ROOT" ]; then
+    echo "❌ Ошибка: Не найден git репозиторий в текущей или родительских директориях"
     exit 1
 fi
 
+echo "📁 Найден git репозиторий в: $GIT_ROOT"
+
 # 1. Получаем последние изменения из git
 echo "📥 Получение последних изменений из git..."
+cd "$GIT_ROOT"
 git pull
 
 if [ $? -ne 0 ]; then
@@ -27,6 +41,9 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "✅ Изменения получены успешно"
+
+# Возвращаемся в директорию с docker-compose.yml
+cd - > /dev/null
 
 # 2. Останавливаем и удаляем все контейнеры, образы и volumes
 echo "🛑 Остановка и очистка Docker..."
