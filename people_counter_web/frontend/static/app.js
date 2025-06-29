@@ -27,11 +27,12 @@ let lastStats = {
   disk_percent: null,
   disk_total_gb: null,
   disk_used_gb: null,
-  net_sent_mb: null,
-  net_recv_mb: null,
-  temp_celsius: null,
-  proc_cpu_percent: null,
-  proc_mem_mb: null,
+  disk_read_mb: null,
+  disk_write_mb: null,
+  disk_read_count: null,
+  disk_write_count: null,
+  net_sent_mbps: null,
+  net_recv_mbps: null,
   status: 'Нет соединения',
   crop_h: null,
   crop_w: null,
@@ -65,7 +66,7 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-220, 0, 220, 200); // Увеличиваем размер для большего количества информации
+  ctx.fillRect(w-220, 0, 220, 300); // Увеличиваем высоту для всех CPU ядер
   ctx.globalAlpha = 1.0;
   
   let y = 5;
@@ -94,10 +95,9 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? stats.cpu_all + '%' : '-'), w-10, y);
   y += lineHeight;
   
-  // CPU по ядрам (первые 4 ядра)
+  // CPU по ядрам (все ядра)
   if (stats.cpu_cores && stats.cpu_cores.length > 0) {
-    const coresToShow = Math.min(4, stats.cpu_cores.length);
-    for (let i = 0; i < coresToShow; i++) {
+    for (let i = 0; i < stats.cpu_cores.length; i++) {
       ctx.fillStyle = '#ff8e8e';
       ctx.fillText(`CPU_${i+1}: ${stats.cpu_cores[i]}%`, w-10, y);
       y += lineHeight;
@@ -118,25 +118,24 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('DISK: ' + diskText, w-10, y);
   y += lineHeight;
   
-  // Температура
-  if (stats.temp_celsius !== null) {
-    ctx.fillStyle = stats.temp_celsius > 70 ? '#ff4757' : '#2ed573';
-    ctx.fillText('TEMP: ' + stats.temp_celsius + '°C', w-10, y);
+  // Диск I/O
+  if (stats.disk_read_mb !== null || stats.disk_write_mb !== null) {
+    ctx.fillStyle = '#ff9ff3';
+    ctx.fillText('DISK_R: ' + (stats.disk_read_mb !== null ? stats.disk_read_mb + 'MB' : '-'), w-10, y);
+    y += lineHeight;
+    ctx.fillText('DISK_W: ' + (stats.disk_write_mb !== null ? stats.disk_write_mb + 'MB' : '-'), w-10, y);
+    y += lineHeight;
+    ctx.fillText('DISK_RC: ' + (stats.disk_read_count !== null ? stats.disk_read_count : '-'), w-10, y);
+    y += lineHeight;
+    ctx.fillText('DISK_WC: ' + (stats.disk_write_count !== null ? stats.disk_write_count : '-'), w-10, y);
     y += lineHeight;
   }
   
-  // Процесс информация
-  ctx.fillStyle = '#ffa502';
-  ctx.fillText('PROC_CPU: ' + (stats.proc_cpu_percent !== null ? stats.proc_cpu_percent + '%' : '-'), w-10, y);
-  y += lineHeight;
-  ctx.fillText('PROC_MEM: ' + (stats.proc_mem_mb !== null ? stats.proc_mem_mb + 'MB' : '-'), w-10, y);
-  y += lineHeight;
-  
   // Сеть
   ctx.fillStyle = '#a55eea';
-  ctx.fillText('NET_S: ' + (stats.net_sent_mb !== null ? stats.net_sent_mb + 'MB' : '-'), w-10, y);
+  ctx.fillText('NET_S: ' + (stats.net_sent_mbps !== null ? stats.net_sent_mbps + 'Mbps' : '-'), w-10, y);
   y += lineHeight;
-  ctx.fillText('NET_R: ' + (stats.net_recv_mb !== null ? stats.net_recv_mb + 'MB' : '-'), w-10, y);
+  ctx.fillText('NET_R: ' + (stats.net_recv_mbps !== null ? stats.net_recv_mbps + 'Mbps' : '-'), w-10, y);
   y += lineHeight;
   
   // Crop и imgsz

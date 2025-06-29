@@ -400,27 +400,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     disk_total_gb = disk.total / (1024**3)
                     disk_used_gb = disk.used / (1024**3)
                     
-                    # Сетевая информация
+                    # Диск I/O статистика
+                    disk_io = psutil.disk_io_counters()
+                    if disk_io:
+                        disk_read_mb = disk_io.read_bytes / (1024**2)
+                        disk_write_mb = disk_io.write_bytes / (1024**2)
+                        disk_read_count = disk_io.read_count
+                        disk_write_count = disk_io.write_count
+                    else:
+                        disk_read_mb = disk_write_mb = disk_read_count = disk_write_count = 0
+                    
+                    # Сетевая информация (в Mbps)
                     net_io = psutil.net_io_counters()
-                    net_sent_mb = net_io.bytes_sent / (1024**2)
-                    net_recv_mb = net_io.bytes_recv / (1024**2)
-                    
-                    # Температура (если доступна)
-                    try:
-                        import subprocess
-                        temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
-                                                   capture_output=True, text=True, timeout=1)
-                        if temp_result.returncode == 0:
-                            temp_celsius = int(temp_result.stdout.strip()) / 1000
-                        else:
-                            temp_celsius = None
-                    except:
-                        temp_celsius = None
-                    
-                    # Процесс информация
-                    process = psutil.Process()
-                    proc_cpu_percent = process.cpu_percent()
-                    proc_mem_mb = process.memory_info().rss / (1024**2)
+                    net_sent_mbps = (net_io.bytes_sent * 8) / (1024**2)  # Convert to Mbps
+                    net_recv_mbps = (net_io.bytes_recv * 8) / (1024**2)  # Convert to Mbps
                     
                     if abs(cpu_percent - last_cpu) > 5 or abs(mem_percent - last_mem) > 5:
                         last_cpu = cpu_percent
@@ -450,11 +443,12 @@ async def websocket_endpoint(websocket: WebSocket):
                         'disk_percent': disk_percent if 'disk_percent' in locals() else None,
                         'disk_total_gb': round(disk_total_gb, 1) if 'disk_total_gb' in locals() else None,
                         'disk_used_gb': round(disk_used_gb, 1) if 'disk_used_gb' in locals() else None,
-                        'net_sent_mb': round(net_sent_mb, 1) if 'net_sent_mb' in locals() else None,
-                        'net_recv_mb': round(net_recv_mb, 1) if 'net_recv_mb' in locals() else None,
-                        'temp_celsius': round(temp_celsius, 1) if temp_celsius is not None else None,
-                        'proc_cpu_percent': round(proc_cpu_percent, 1) if 'proc_cpu_percent' in locals() else None,
-                        'proc_mem_mb': round(proc_mem_mb, 1) if 'proc_mem_mb' in locals() else None,
+                        'disk_read_mb': round(disk_read_mb, 1) if 'disk_read_mb' in locals() else None,
+                        'disk_write_mb': round(disk_write_mb, 1) if 'disk_write_mb' in locals() else None,
+                        'disk_read_count': disk_read_count if 'disk_read_count' in locals() else None,
+                        'disk_write_count': disk_write_count if 'disk_write_count' in locals() else None,
+                        'net_sent_mbps': round(net_sent_mbps, 1) if 'net_sent_mbps' in locals() else None,
+                        'net_recv_mbps': round(net_recv_mbps, 1) if 'net_recv_mbps' in locals() else None,
                         'status': 'ok',
                         'crop_h': crop_h,
                         'crop_w': crop_w,
