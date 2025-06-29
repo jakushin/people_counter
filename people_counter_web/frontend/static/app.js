@@ -18,9 +18,27 @@ let lastStats = {
   timestamp: null,
   fps: null,
   shape: null,
-  cpu: null,
-  mem: null,
-  status: 'Нет соединения'
+  cpu_all: null,
+  cpu_cores: [],
+  mem_percent: null,
+  mem_total_gb: null,
+  mem_used_gb: null,
+  mem_available_gb: null,
+  disk_percent: null,
+  disk_total_gb: null,
+  disk_used_gb: null,
+  net_sent_mb: null,
+  net_recv_mb: null,
+  temp_celsius: null,
+  proc_cpu_percent: null,
+  proc_mem_mb: null,
+  status: 'Нет соединения',
+  crop_h: null,
+  crop_w: null,
+  imgsz: null,
+  frame_count: null,
+  source_type: null,
+  detect_time: null
 };
 let bytesReceived = [];
 let roiPoints = null;
@@ -42,30 +60,103 @@ function setStatus(msg, error=false) {
 
 function drawOverlay(ctx, stats, w, h) {
   ctx.save();
-  ctx.font = '13px monospace';
+  ctx.font = '12px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 150); // Увеличиваем высоту для видео информации
+  ctx.fillRect(w-220, 0, 220, 200); // Увеличиваем размер для большего количества информации
   ctx.globalAlpha = 1.0;
-  ctx.fillStyle = '#0f0';
-  ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
-  ctx.fillStyle = '#fff';
-  ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, 22);
-  ctx.fillText('FPS: ' + (stats.fps ?? '-'), w-10, 37);
-  ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, 52);
-  ctx.fillText('CPU: ' + (stats.cpu !== null ? stats.cpu + '%' : '-'), w-10, 67);
-  ctx.fillText('MEM: ' + (stats.mem !== null ? stats.mem + '%' : '-'), w-10, 82);
-  ctx.fillStyle = '#ff0';
-  ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, 97);
-  ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, 112);
   
-  // Добавляем информацию о видео
+  let y = 5;
+  const lineHeight = 16;
+  
+  // Статус
+  ctx.fillStyle = '#0f0';
+  ctx.fillText('Статус: ' + (stats.status || ''), w-10, y);
+  y += lineHeight;
+  
+  // Время
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, y);
+  y += lineHeight;
+  
+  // FPS
+  ctx.fillText('FPS: ' + (stats.fps ?? '-'), w-10, y);
+  y += lineHeight;
+  
+  // Размер кадра
+  ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, y);
+  y += lineHeight;
+  
+  // CPU общий
+  ctx.fillStyle = '#ff6b6b';
+  ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? stats.cpu_all + '%' : '-'), w-10, y);
+  y += lineHeight;
+  
+  // CPU по ядрам (первые 4 ядра)
+  if (stats.cpu_cores && stats.cpu_cores.length > 0) {
+    const coresToShow = Math.min(4, stats.cpu_cores.length);
+    for (let i = 0; i < coresToShow; i++) {
+      ctx.fillStyle = '#ff8e8e';
+      ctx.fillText(`CPU_${i+1}: ${stats.cpu_cores[i]}%`, w-10, y);
+      y += lineHeight;
+    }
+  }
+  
+  // Память с информацией о размере
+  ctx.fillStyle = '#4ecdc4';
+  const memText = stats.mem_percent !== null ? 
+    `${stats.mem_percent}% (${stats.mem_used_gb}/${stats.mem_total_gb}GB)` : '-';
+  ctx.fillText('MEM: ' + memText, w-10, y);
+  y += lineHeight;
+  
+  // Диск
+  ctx.fillStyle = '#45b7d1';
+  const diskText = stats.disk_percent !== null ? 
+    `${stats.disk_percent}% (${stats.disk_used_gb}/${stats.disk_total_gb}GB)` : '-';
+  ctx.fillText('DISK: ' + diskText, w-10, y);
+  y += lineHeight;
+  
+  // Температура
+  if (stats.temp_celsius !== null) {
+    ctx.fillStyle = stats.temp_celsius > 70 ? '#ff4757' : '#2ed573';
+    ctx.fillText('TEMP: ' + stats.temp_celsius + '°C', w-10, y);
+    y += lineHeight;
+  }
+  
+  // Процесс информация
+  ctx.fillStyle = '#ffa502';
+  ctx.fillText('PROC_CPU: ' + (stats.proc_cpu_percent !== null ? stats.proc_cpu_percent + '%' : '-'), w-10, y);
+  y += lineHeight;
+  ctx.fillText('PROC_MEM: ' + (stats.proc_mem_mb !== null ? stats.proc_mem_mb + 'MB' : '-'), w-10, y);
+  y += lineHeight;
+  
+  // Сеть
+  ctx.fillStyle = '#a55eea';
+  ctx.fillText('NET_S: ' + (stats.net_sent_mb !== null ? stats.net_sent_mb + 'MB' : '-'), w-10, y);
+  y += lineHeight;
+  ctx.fillText('NET_R: ' + (stats.net_recv_mb !== null ? stats.net_recv_mb + 'MB' : '-'), w-10, y);
+  y += lineHeight;
+  
+  // Crop и imgsz
+  ctx.fillStyle = '#ff0';
+  ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, y);
+  y += lineHeight;
+  ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, y);
+  y += lineHeight;
+  
+  // Время детекции
+  ctx.fillStyle = '#ff6348';
+  ctx.fillText('Detect: ' + (stats.detect_time || '-') + 's', w-10, y);
+  y += lineHeight;
+  
+  // Информация о видео
   if (currentVideo) {
     ctx.fillStyle = '#ffa500';
-    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, 127);
+    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, y);
   }
+  
   ctx.restore();
 }
 

@@ -383,14 +383,51 @@ async def websocket_endpoint(websocket: WebSocket):
                 
                 # Отправляем статистику каждые 5 секунд
                 if now - last_stat_time >= 5.0:
+                    # CPU информация
                     cpu_percent = psutil.cpu_percent(interval=None)
-                    mem_percent = psutil.virtual_memory().percent
+                    cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+                    
+                    # Память информация
+                    mem = psutil.virtual_memory()
+                    mem_percent = mem.percent
+                    mem_total_gb = mem.total / (1024**3)
+                    mem_used_gb = mem.used / (1024**3)
+                    mem_available_gb = mem.available / (1024**3)
+                    
+                    # Диск информация
+                    disk = psutil.disk_usage('/')
+                    disk_percent = disk.percent
+                    disk_total_gb = disk.total / (1024**3)
+                    disk_used_gb = disk.used / (1024**3)
+                    
+                    # Сетевая информация
+                    net_io = psutil.net_io_counters()
+                    net_sent_mb = net_io.bytes_sent / (1024**2)
+                    net_recv_mb = net_io.bytes_recv / (1024**2)
+                    
+                    # Температура (если доступна)
+                    try:
+                        import subprocess
+                        temp_result = subprocess.run(['cat', '/sys/class/thermal/thermal_zone0/temp'], 
+                                                   capture_output=True, text=True, timeout=1)
+                        if temp_result.returncode == 0:
+                            temp_celsius = int(temp_result.stdout.strip()) / 1000
+                        else:
+                            temp_celsius = None
+                    except:
+                        temp_celsius = None
+                    
+                    # Процесс информация
+                    process = psutil.Process()
+                    proc_cpu_percent = process.cpu_percent()
+                    proc_mem_mb = process.memory_info().rss / (1024**2)
+                    
                     if abs(cpu_percent - last_cpu) > 5 or abs(mem_percent - last_mem) > 5:
                         last_cpu = cpu_percent
                         last_mem = mem_percent
                         last_stat_time = now
                         # Логируем статистику всегда, так как она важна для диагностики
-                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%')
+                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={disk_percent}%')
                 
                 # Отправляем кадр клиенту
                 try:
@@ -404,8 +441,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         'timestamp': stats['timestamp'],
                         'fps': stats['fps'],
                         'shape': stats['shape'],
-                        'cpu': last_cpu,
-                        'mem': last_mem,
+                        'cpu_all': last_cpu,
+                        'cpu_cores': cpu_per_core if 'cpu_per_core' in locals() else [],
+                        'mem_percent': last_mem,
+                        'mem_total_gb': round(mem_total_gb, 1) if 'mem_total_gb' in locals() else None,
+                        'mem_used_gb': round(mem_used_gb, 1) if 'mem_used_gb' in locals() else None,
+                        'mem_available_gb': round(mem_available_gb, 1) if 'mem_available_gb' in locals() else None,
+                        'disk_percent': disk_percent if 'disk_percent' in locals() else None,
+                        'disk_total_gb': round(disk_total_gb, 1) if 'disk_total_gb' in locals() else None,
+                        'disk_used_gb': round(disk_used_gb, 1) if 'disk_used_gb' in locals() else None,
+                        'net_sent_mb': round(net_sent_mb, 1) if 'net_sent_mb' in locals() else None,
+                        'net_recv_mb': round(net_recv_mb, 1) if 'net_recv_mb' in locals() else None,
+                        'temp_celsius': round(temp_celsius, 1) if temp_celsius is not None else None,
+                        'proc_cpu_percent': round(proc_cpu_percent, 1) if 'proc_cpu_percent' in locals() else None,
+                        'proc_mem_mb': round(proc_mem_mb, 1) if 'proc_mem_mb' in locals() else None,
                         'status': 'ok',
                         'crop_h': crop_h,
                         'crop_w': crop_w,
