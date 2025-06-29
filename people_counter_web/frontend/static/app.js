@@ -304,8 +304,12 @@ function connectWS() {
   };
 }
 
-startBtn.onclick = () => {
+startBtn.onclick = async () => {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  
+  // Останавливаем предыдущий источник перед подключением к новому
+  await resetVideoState();
+  
   connectWS();
 };
 
@@ -410,19 +414,19 @@ window.addEventListener('DOMContentLoaded', () => {
   const startVideoBtn = document.getElementById('start-video-btn');
   const stopVideoBtn = document.getElementById('stop-video-btn');
   
-  cameraSource.addEventListener('change', () => {
+  cameraSource.addEventListener('change', async () => {
     console.log('[DEBUG] Camera source selected');
     currentSource = 'camera';
     updateSourceControls();
-    resetVideoState();
+    await resetVideoState();
   });
   
-  videoSource.addEventListener('change', () => {
+  videoSource.addEventListener('change', async () => {
     console.log('[DEBUG] Video source selected');
     currentSource = 'video';
     updateSourceControls();
     loadVideoList();
-    resetVideoState();
+    await resetVideoState();
   });
   
   uploadBtn.addEventListener('click', uploadVideo);
@@ -645,8 +649,32 @@ function updateSourceControls() {
   }
 }
 
-function resetVideoState() {
+async function resetVideoState() {
+  console.log('Resetting video state due to source change');
+  
+  // Останавливаем видео на backend если оно запущено
+  if (currentVideo) {
+    try {
+      console.log('Stopping current video on backend:', currentVideo);
+      const response = await fetch('/api/videos/stop', {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log('Video stopped successfully on backend');
+        setStatus('Предыдущий источник остановлен', false);
+      } else {
+        console.warn('Failed to stop video on backend');
+      }
+    } catch (error) {
+      console.error('Error stopping video on backend:', error);
+    }
+  }
+  
+  // Сбрасываем состояние
   currentVideo = null;
+  
+  // Закрываем WebSocket соединение
   if (ws && ws.readyState === 1) {
     console.log('Closing WebSocket connection due to source change');
     manualClose = true;
