@@ -514,6 +514,7 @@ async function uploadVideo() {
     
     if (response.ok) {
       const result = await response.json();
+      console.log('Upload response:', result);
       setStatus(`Видео загружено и сконвертировано: ${result.filename}`, false);
       await loadVideoList();
       fileInput.value = '';

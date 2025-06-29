@@ -216,7 +216,7 @@ async def upload_video(file: UploadFile = File(...)):
         debug_log(f'[API] Video converted successfully: {file.filename}')
         debug_log(f'[API] Temporary file removed: {tmp_filename}')
         
-        return {"message": f"Video uploaded and converted: {file.filename}"}
+        return {"filename": file.filename, "message": f"Video uploaded and converted: {file.filename}"}
         
     except Exception as e:
         logging.error(f'[API] Upload error: {e}')
