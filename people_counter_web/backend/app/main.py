@@ -268,15 +268,30 @@ def get_current_video():
     return {"current_video": current_video_file}
 
 @app.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    user: str = Query(...),
-    password: str = Query(...),
-    host: str = Query(...)
-):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    debug_log(f'[WS] WebSocket connection accepted. User: {user}, Host: {host}')
+    debug_log(f'[WS] WebSocket connection accepted')
     debug_log(f'[WS] current_video_file at connection start: {current_video_file}')
+    
+    # Получаем учетные данные через первое сообщение
+    try:
+        # Ждем первое сообщение с учетными данными
+        msg = await websocket.receive_text()
+        data = json.loads(msg)
+        
+        if data.get('type') == 'auth':
+            user = data.get('user', 'dummy')
+            password = data.get('password', 'dummy')
+            host = data.get('host', 'dummy')
+            debug_log(f'[WS] Authentication received. User: {user}, Host: {host}')
+        else:
+            # Если первое сообщение не auth, используем dummy значения
+            user, password, host = 'dummy', 'dummy', 'dummy'
+            debug_log(f'[WS] No auth message, using dummy credentials')
+    except Exception as e:
+        # В случае ошибки используем dummy значения
+        user, password, host = 'dummy', 'dummy', 'dummy'
+        debug_log(f'[WS] Auth error, using dummy credentials: {e}')
     
     # Определяем источник видео
     if current_video_file:

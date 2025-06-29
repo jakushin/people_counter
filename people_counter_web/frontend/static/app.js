@@ -190,25 +190,40 @@ function connectWS() {
     return;
   }
   
-  // Формируем WebSocket URL
-  let wsUrl;
-  if (currentSource === 'video') {
-    // Для видео используем фиктивные параметры, так как RTSP URL формируется на backend
-    wsUrl = `ws://${window.location.host}/ws?user=dummy&password=dummy&host=dummy`;
-    console.log('Connecting to WebSocket for video:', wsUrl);
-  } else {
-    // Для камеры используем реальные параметры
-    wsUrl = `ws://${window.location.host}/ws?user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}&host=${encodeURIComponent(host)}`;
-    console.log('Connecting to WebSocket for camera:', wsUrl);
-  }
+  // Формируем WebSocket URL без параметров
+  const wsUrl = `ws://${window.location.host}/ws`;
+  console.log('Connecting to WebSocket:', wsUrl);
   
   setStatus('Подключение...', false);
   ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
   lastStats.status = 'Подключение...';
   roiReceivedFromBackend = false; // Сброс при новом подключении
+  
   ws.onopen = function(event) {
-    console.log('WebSocket connected');
+    console.log('WebSocket connected, sending auth...');
+    
+    // Отправляем учетные данные через сообщение
+    let authData;
+    if (currentSource === 'video') {
+      // Для видео используем фиктивные параметры
+      authData = {
+        type: 'auth',
+        user: 'dummy',
+        password: 'dummy',
+        host: 'dummy'
+      };
+    } else {
+      // Для камеры используем реальные параметры
+      authData = {
+        type: 'auth',
+        user: user,
+        password: password,
+        host: host
+      };
+    }
+    
+    ws.send(JSON.stringify(authData));
     setStatus('Подключено', false);
     lastStats.status = 'Подключено';
     if (lastImg) {
