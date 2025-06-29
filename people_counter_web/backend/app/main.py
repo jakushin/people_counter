@@ -216,7 +216,7 @@ async def upload_video(file: UploadFile = File(...)):
         debug_log(f'[API] Video converted successfully: {file.filename}')
         debug_log(f'[API] Temporary file removed: {tmp_filename}')
         
-        return {"message": f"Video uploaded and converted: {file.filename}"}
+        return {"filename": file.filename, "message": f"Video uploaded and converted: {file.filename}"}
         
     except Exception as e:
         logging.error(f'[API] Upload error: {e}')
@@ -268,15 +268,30 @@ def get_current_video():
     return {"current_video": current_video_file}
 
 @app.websocket("/ws")
-async def websocket_endpoint(
-    websocket: WebSocket,
-    user: str = Query(...),
-    password: str = Query(...),
-    host: str = Query(...)
-):
+async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
-    debug_log(f'[WS] WebSocket connection accepted. User: {user}, Host: {host}')
+    debug_log(f'[WS] WebSocket connection accepted')
     debug_log(f'[WS] current_video_file at connection start: {current_video_file}')
+    
+    # Получаем учетные данные через первое сообщение
+    try:
+        # Ждем первое сообщение с учетными данными
+        msg = await websocket.receive_text()
+        data = json.loads(msg)
+        
+        if data.get('type') == 'auth':
+            user = data.get('user', 'dummy')
+            password = data.get('password', 'dummy')
+            host = data.get('host', 'dummy')
+            debug_log(f'[WS] Authentication received. User: {user}, Host: {host}')
+        else:
+            # Если первое сообщение не auth, используем dummy значения
+            user, password, host = 'dummy', 'dummy', 'dummy'
+            debug_log(f'[WS] No auth message, using dummy credentials')
+    except Exception as e:
+        # В случае ошибки используем dummy значения
+        user, password, host = 'dummy', 'dummy', 'dummy'
+        debug_log(f'[WS] Auth error, using dummy credentials: {e}')
     
     # Определяем источник видео
     if current_video_file:
@@ -309,6 +324,21 @@ async def websocket_endpoint(
     last_mem = 0
     last_send_time = time.time()
     frame_count = 0
+    
+    # Инициализируем переменные метрик
+    avg_cpu_cores = []
+    avg_disk_percent = 0
+    avg_read_speed = 0
+    avg_write_speed = 0
+    avg_read_latency = 0
+    avg_write_latency = 0
+    avg_net_sent_mbps = 0
+    avg_net_recv_mbps = 0
+    mem_total_gb = 0
+    mem_used_gb = 0
+    mem_available_gb = 0
+    disk_total_gb = 0
+    disk_used_gb = 0
     
     try:
         debug_log(f'[WS] Creating VideoStream for: {rtsp_url}')
@@ -366,16 +396,149 @@ async def websocket_endpoint(
                     logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
                 
-                # Отправляем статистику каждые 5 секунд
-                if now - last_stat_time >= 5.0:
-                    cpu_percent = psutil.cpu_percent(interval=None)
-                    mem_percent = psutil.virtual_memory().percent
-                    if abs(cpu_percent - last_cpu) > 5 or abs(mem_percent - last_mem) > 5:
-                        last_cpu = cpu_percent
-                        last_mem = mem_percent
-                        last_stat_time = now
-                        # Логируем статистику всегда, так как она важна для диагностики
-                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%')
+                # Отправляем статистику каждую секунду (максимальная частота)
+                if now - last_stat_time >= 1.0:
+                    # Дебаг логи для диагностики
+                    debug_log(f'[DEBUG] Sending stats update: time_since_last={now - last_stat_time:.1f}s, frame_count={frame_count}')
+                    
+                    # CPU информация
+                    cpu_percent = round(psutil.cpu_percent(interval=None))
+                    cpu_per_core = [round(x) for x in psutil.cpu_percent(interval=None, percpu=True)]
+                    
+                    # Память информация
+                    mem = psutil.virtual_memory()
+                    mem_percent = mem.percent
+                    mem_total_gb = round(mem.total / (1024**3))
+                    mem_used_gb = round(mem.used / (1024**3))
+                    mem_available_gb = round(mem.available / (1024**3))
+                    
+                    # Диск информация
+                    disk = psutil.disk_usage('/')
+                    disk_percent = disk.percent
+                    disk_total_gb = round(disk.total / (1024**3))
+                    disk_used_gb = round(disk.used / (1024**3))
+                    
+                    # Диск I/O статистика (текущая скорость)
+                    disk_io = psutil.disk_io_counters()
+                    if disk_io:
+                        # Получаем текущие значения
+                        current_read_bytes = disk_io.read_bytes
+                        current_write_bytes = disk_io.write_bytes
+                        current_read_count = disk_io.read_count
+                        current_write_count = disk_io.write_count
+                        
+                        # Вычисляем скорость относительно предыдущих значений
+                        if hasattr(stream, '_prev_disk_io'):
+                            time_diff = now - stream._prev_disk_io['time']
+                            if time_diff > 0:
+                                read_speed = (current_read_bytes - stream._prev_disk_io['read_bytes']) / time_diff
+                                write_speed = (current_write_bytes - stream._prev_disk_io['write_bytes']) / time_diff
+                                read_latency = (current_read_count - stream._prev_disk_io['read_count']) / time_diff
+                                write_latency = (current_write_count - stream._prev_disk_io['write_count']) / time_diff
+                            else:
+                                read_speed = write_speed = read_latency = write_latency = 0
+                        else:
+                            read_speed = write_speed = read_latency = write_latency = 0
+                        
+                        # Сохраняем текущие значения для следующего расчета
+                        stream._prev_disk_io = {
+                            'time': now,
+                            'read_bytes': current_read_bytes,
+                            'write_bytes': current_write_bytes,
+                            'read_count': current_read_count,
+                            'write_count': current_write_count
+                        }
+                    else:
+                        read_speed = write_speed = read_latency = write_latency = 0
+                    
+                    # Сетевая информация (текущая скорость в Mbps)
+                    net_io = psutil.net_io_counters()
+                    current_sent_bytes = net_io.bytes_sent
+                    current_recv_bytes = net_io.bytes_recv
+                    
+                    # Вычисляем текущую скорость сети
+                    if hasattr(stream, '_prev_net_io'):
+                        time_diff = now - stream._prev_net_io['time']
+                        if time_diff > 0:
+                            net_sent_mbps = ((current_sent_bytes - stream._prev_net_io['sent_bytes']) * 8) / (1024**2 * time_diff)
+                            net_recv_mbps = ((current_recv_bytes - stream._prev_net_io['recv_bytes']) * 8) / (1024**2 * time_diff)
+                        else:
+                            net_sent_mbps = net_recv_mbps = 0
+                    else:
+                        net_sent_mbps = net_recv_mbps = 0
+                    
+                    # Сохраняем текущие значения для следующего расчета
+                    stream._prev_net_io = {
+                        'time': now,
+                        'sent_bytes': current_sent_bytes,
+                        'recv_bytes': current_recv_bytes
+                    }
+                    
+                    # Сглаживание метрик за 2 секунды (2 измерения по 1 секунде)
+                    if not hasattr(stream, '_metrics_history'):
+                        stream._metrics_history = []
+                    
+                    current_metrics = {
+                        'cpu_all': cpu_percent,
+                        'cpu_cores': cpu_per_core,
+                        'mem_percent': mem_percent,
+                        'disk_percent': disk_percent,
+                        'read_speed': read_speed,
+                        'write_speed': write_speed,
+                        'read_latency': read_latency,
+                        'write_latency': write_latency,
+                        'net_sent_mbps': net_sent_mbps,
+                        'net_recv_mbps': net_recv_mbps,
+                        'timestamp': now
+                    }
+                    
+                    stream._metrics_history.append(current_metrics)
+                    
+                    # Оставляем только последние 2 измерений (2 секунды)
+                    if len(stream._metrics_history) > 2:
+                        stream._metrics_history.pop(0)
+                    
+                    # Вычисляем средние значения
+                    if len(stream._metrics_history) > 0:
+                        avg_cpu_all = round(sum(m['cpu_all'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_mem_percent = round(sum(m['mem_percent'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_disk_percent = round(sum(m['disk_percent'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_read_speed = sum(m['read_speed'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_write_speed = sum(m['write_speed'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_read_latency = sum(m['read_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_write_latency = sum(m['write_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_net_sent_mbps = sum(m['net_sent_mbps'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_net_recv_mbps = sum(m['net_recv_mbps'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        
+                        # Для CPU ядер вычисляем среднее по каждому ядру
+                        num_cores = len(cpu_per_core)
+                        avg_cpu_cores = []
+                        for core_idx in range(num_cores):
+                            core_avg = sum(m['cpu_cores'][core_idx] for m in stream._metrics_history) / len(stream._metrics_history)
+                            avg_cpu_cores.append(round(core_avg))
+                    else:
+                        # Если нет истории, используем текущие значения
+                        avg_cpu_all = cpu_percent
+                        avg_cpu_cores = cpu_per_core
+                        avg_mem_percent = mem_percent
+                        avg_disk_percent = disk_percent
+                        avg_read_speed = read_speed
+                        avg_write_speed = write_speed
+                        avg_read_latency = read_latency
+                        avg_write_latency = write_latency
+                        avg_net_sent_mbps = net_sent_mbps
+                        avg_net_recv_mbps = net_recv_mbps
+                    
+                    # Всегда обновляем значения и время (убираем условие с порогом 5%)
+                    last_cpu = avg_cpu_all
+                    last_mem = avg_mem_percent
+                    last_stat_time = now
+                    
+                    # Логируем статистику всегда, так как она важна для диагностики
+                    logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={avg_disk_percent}%')
+                    
+                    # Дебаг логи для диагностики
+                    debug_log(f'[DEBUG] Metrics calculated: history_size={len(stream._metrics_history)}, avg_cpu={avg_cpu_all}%, avg_mem={avg_mem_percent}%')
                 
                 # Отправляем кадр клиенту
                 try:
@@ -389,16 +552,32 @@ async def websocket_endpoint(
                         'timestamp': stats['timestamp'],
                         'fps': stats['fps'],
                         'shape': stats['shape'],
-                        'cpu': last_cpu,
-                        'mem': last_mem,
+                        'cpu_all': last_cpu,
+                        'cpu_cores': avg_cpu_cores,
+                        'mem_percent': last_mem,
+                        'mem_total_gb': mem_total_gb,
+                        'mem_used_gb': mem_used_gb,
+                        'mem_available_gb': mem_available_gb,
+                        'disk_percent': avg_disk_percent,
+                        'disk_total_gb': disk_total_gb,
+                        'disk_used_gb': disk_used_gb,
+                        'disk_read_speed': avg_read_speed,
+                        'disk_write_speed': avg_write_speed,
+                        'disk_read_latency': avg_read_latency,
+                        'disk_write_latency': avg_write_latency,
+                        'net_sent_mbps': avg_net_sent_mbps,
+                        'net_recv_mbps': avg_net_recv_mbps,
                         'status': 'ok',
                         'crop_h': crop_h,
                         'crop_w': crop_w,
                         'imgsz': imgsz,
                         'frame_count': frame_count,
-                        'source_type': source_type,
-                        'detect_time': round(detect_time, 3)
+                        'source_type': source_type
                     }
+                    
+                    # Дебаг логи для диагностики отправки
+                    debug_log(f'[DEBUG] Sending metadata: frame_count={frame_count}, metadata_size={len(str(metadata))} chars')
+                    
                     await websocket.send_text(json.dumps(metadata))
                     
                     # Проверяем состояние перед отправкой изображения

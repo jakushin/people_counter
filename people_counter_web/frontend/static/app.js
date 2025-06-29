@@ -18,9 +18,28 @@ let lastStats = {
   timestamp: null,
   fps: null,
   shape: null,
-  cpu: null,
-  mem: null,
-  status: 'Нет соединения'
+  cpu_all: null,
+  cpu_cores: [],
+  mem_percent: null,
+  mem_total_gb: null,
+  mem_used_gb: null,
+  mem_available_gb: null,
+  disk_percent: null,
+  disk_total_gb: null,
+  disk_used_gb: null,
+  disk_read_speed: 0,
+  disk_write_speed: 0,
+  disk_read_latency: 0,
+  disk_write_latency: 0,
+  net_sent_mbps: null,
+  net_recv_mbps: null,
+  status: 'Нет соединения',
+  crop_h: null,
+  crop_w: null,
+  imgsz: null,
+  frame_count: null,
+  source_type: null,
+  detect_time: null
 };
 let bytesReceived = [];
 let roiPoints = null;
@@ -40,32 +59,147 @@ function setStatus(msg, error=false) {
   statusDiv.style.color = error ? 'red' : 'green';
 }
 
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B/s';
+  const k = 1024;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatLatency(ops) {
+  if (ops === 0) return '0 ops/s';
+  if (ops < 1) return (ops * 1000).toFixed(1) + ' mops/s';
+  if (ops < 1000) return ops.toFixed(1) + ' ops/s';
+  return (ops / 1000).toFixed(1) + ' kops/s';
+}
+
+function formatMetric(value, unit, maxWidth = 8) {
+  const text = value + unit;
+  return text.padStart(maxWidth);
+}
+
+function formatFPS(fps) {
+  if (fps === null || fps === undefined) return '   -';
+  const fpsText = fps.toFixed(1);
+  return fpsText.padStart(5); // 5 символов для FPS (например: " 9.5")
+}
+
+function formatDiskMetric(value, formatter) {
+  const formatted = formatter(value);
+  return formatted.padStart(12); // 12 символов для disk метрик
+}
+
 function drawOverlay(ctx, stats, w, h) {
   ctx.save();
-  ctx.font = '13px monospace';
+  ctx.font = '12px monospace';
   ctx.textAlign = 'right';
   ctx.textBaseline = 'top';
   ctx.globalAlpha = 0.8;
   ctx.fillStyle = '#222';
-  ctx.fillRect(w-180, 0, 180, 150); // Увеличиваем высоту для видео информации
+  ctx.fillRect(w-220, 0, 220, 300); // Увеличиваем высоту для всех CPU ядер
   ctx.globalAlpha = 1.0;
-  ctx.fillStyle = '#0f0';
-  ctx.fillText('Статус: ' + (stats.status || ''), w-10, 5);
-  ctx.fillStyle = '#fff';
-  ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, 22);
-  ctx.fillText('FPS: ' + (stats.fps ?? '-'), w-10, 37);
-  ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, 52);
-  ctx.fillText('CPU: ' + (stats.cpu !== null ? stats.cpu + '%' : '-'), w-10, 67);
-  ctx.fillText('MEM: ' + (stats.mem !== null ? stats.mem + '%' : '-'), w-10, 82);
-  ctx.fillStyle = '#ff0';
-  ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, 97);
-  ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, 112);
   
-  // Добавляем информацию о видео
+  let y = 5;
+  const lineHeight = 16;
+  
+  // Статус
+  ctx.fillStyle = '#0f0';
+  ctx.fillText('Статус: ' + (stats.status || ''), w-10, y);
+  y += lineHeight;
+  
+  // Время
+  ctx.fillStyle = '#fff';
+  ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, y);
+  y += lineHeight;
+  
+  // FPS (выравнивание по 5 символам)
+  ctx.fillText('FPS: ' + formatFPS(stats.fps), w-10, y);
+  y += lineHeight;
+  
+  // Размер кадра
+  ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, y);
+  y += lineHeight;
+  
+  // CPU общий (выравнивание по 3 символам) - жирный и увеличенный шрифт
+  ctx.fillStyle = '#ff6b6b';
+  ctx.font = 'bold 14px monospace'; // Увеличиваем шрифт с 12px до 14px и делаем жирным
+  const cpuAllText = 'CPU_all: ' + formatMetric(Math.round(stats.cpu_all || 0), '%', 3);
+  ctx.fillText(cpuAllText, w-10, y);
+  y += lineHeight;
+  
+  // Возвращаем обычный шрифт для остальных метрик
+  ctx.font = '12px monospace';
+  
+  // CPU по ядрам (все ядра, отсортированные по номеру, выравнивание по 3 символам)
+  if (stats.cpu_cores && stats.cpu_cores.length > 0) {
+    // Создаем массив с индексами для сортировки
+    const cpuWithIndex = stats.cpu_cores.map((value, index) => ({ value: Math.round(value), index }));
+    // Сортируем по индексу (номеру ядра)
+    cpuWithIndex.sort((a, b) => a.index - b.index);
+    
+    for (let i = 0; i < cpuWithIndex.length; i++) {
+      ctx.fillStyle = '#ff8e8e';
+      const cpuText = `CPU_${(cpuWithIndex[i].index + 1).toString().padStart(2)}: ${formatMetric(cpuWithIndex[i].value, '%', 3)}`;
+      ctx.fillText(cpuText, w-10, y);
+      y += lineHeight;
+    }
+  }
+  
+  // Память с информацией о размере (выравнивание по 3 символам)
+  ctx.fillStyle = '#4ecdc4';
+  const memPercent = Math.round(stats.mem_percent || 0);
+  const memText = `MEM: ${formatMetric(memPercent, '%', 3)} (${stats.mem_used_gb}/${stats.mem_total_gb}GB)`;
+  ctx.fillText(memText, w-10, y);
+  y += lineHeight;
+  
+  // Диск (выравнивание по 3 символам)
+  ctx.fillStyle = '#45b7d1';
+  const diskPercent = Math.round(stats.disk_percent || 0);
+  const diskText = `DISK: ${formatMetric(diskPercent, '%', 3)} (${stats.disk_used_gb}/${stats.disk_total_gb}GB)`;
+  ctx.fillText(diskText, w-10, y);
+  y += lineHeight;
+  
+  // Диск I/O (всегда показываем, выравнивание по 12 символам)
+  ctx.fillStyle = '#ff9ff3';
+  const diskReadText = 'DISK_R: ' + formatDiskMetric(stats.disk_read_speed, formatBytes);
+  ctx.fillText(diskReadText, w-10, y);
+  y += lineHeight;
+  const diskWriteText = 'DISK_W: ' + formatDiskMetric(stats.disk_write_speed, formatBytes);
+  ctx.fillText(diskWriteText, w-10, y);
+  y += lineHeight;
+  
+  // Диск Latency (всегда показываем, выравнивание по 12 символам)
+  ctx.fillStyle = '#ff6b9d';
+  const diskReadLatText = 'DISK_RL: ' + formatDiskMetric(stats.disk_read_latency, formatLatency);
+  ctx.fillText(diskReadLatText, w-10, y);
+  y += lineHeight;
+  const diskWriteLatText = 'DISK_WL: ' + formatDiskMetric(stats.disk_write_latency, formatLatency);
+  ctx.fillText(diskWriteLatText, w-10, y);
+  y += lineHeight;
+  
+  // Сеть (выравнивание по 4 символам)
+  ctx.fillStyle = '#a55eea';
+  const netSentText = 'NET_S: ' + formatMetric(Math.round(stats.net_sent_mbps || 0), 'Mbps', 4);
+  ctx.fillText(netSentText, w-10, y);
+  y += lineHeight;
+  const netRecvText = 'NET_R: ' + formatMetric(Math.round(stats.net_recv_mbps || 0), 'Mbps', 4);
+  ctx.fillText(netRecvText, w-10, y);
+  y += lineHeight;
+  
+  // Crop и imgsz
+  ctx.fillStyle = '#ff0';
+  ctx.fillText('Crop: ' + (stats.crop_w && stats.crop_h ? stats.crop_w + 'x' + stats.crop_h : '-'), w-10, y);
+  y += lineHeight;
+  ctx.fillText('imgsz: ' + (stats.imgsz || '-'), w-10, y);
+  y += lineHeight;
+  
+  // Информация о видео
   if (currentVideo) {
     ctx.fillStyle = '#ffa500';
-    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, 127);
+    ctx.fillText('Video: ' + currentVideo.substring(0, 15) + '...', w-10, y);
   }
+  
   ctx.restore();
 }
 
@@ -190,25 +324,40 @@ function connectWS() {
     return;
   }
   
-  // Формируем WebSocket URL
-  let wsUrl;
-  if (currentSource === 'video') {
-    // Для видео используем фиктивные параметры, так как RTSP URL формируется на backend
-    wsUrl = `ws://${window.location.host}/ws?user=dummy&password=dummy&host=dummy`;
-    console.log('Connecting to WebSocket for video:', wsUrl);
-  } else {
-    // Для камеры используем реальные параметры
-    wsUrl = `ws://${window.location.host}/ws?user=${encodeURIComponent(user)}&password=${encodeURIComponent(password)}&host=${encodeURIComponent(host)}`;
-    console.log('Connecting to WebSocket for camera:', wsUrl);
-  }
+  // Формируем WebSocket URL без параметров
+  const wsUrl = `ws://${window.location.host}/ws`;
+  console.log('Connecting to WebSocket:', wsUrl);
   
   setStatus('Подключение...', false);
   ws = new WebSocket(wsUrl);
   ws.binaryType = 'arraybuffer';
   lastStats.status = 'Подключение...';
   roiReceivedFromBackend = false; // Сброс при новом подключении
+  
   ws.onopen = function(event) {
-    console.log('WebSocket connected');
+    console.log('WebSocket connected, sending auth...');
+    
+    // Отправляем учетные данные через сообщение
+    let authData;
+    if (currentSource === 'video') {
+      // Для видео используем фиктивные параметры
+      authData = {
+        type: 'auth',
+        user: 'dummy',
+        password: 'dummy',
+        host: 'dummy'
+      };
+    } else {
+      // Для камеры используем реальные параметры
+      authData = {
+        type: 'auth',
+        user: user,
+        password: password,
+        host: host
+      };
+    }
+    
+    ws.send(JSON.stringify(authData));
     setStatus('Подключено', false);
     lastStats.status = 'Подключено';
     if (lastImg) {
@@ -235,42 +384,96 @@ function connectWS() {
   };
   ws.onmessage = function(event) {
     if (event.data instanceof ArrayBuffer) {
-      // Это JPEG изображение
-      const blob = new Blob([event.data], { type: 'image/jpeg' });
-      const img = new window.Image();
+      // Получение изображения
+      const arrayBuffer = event.data;
+      const uint8Array = new Uint8Array(arrayBuffer);
+      const blob = new Blob([uint8Array], { type: 'image/jpeg' });
+      const url = URL.createObjectURL(blob);
+      
+      const img = new Image();
       img.onload = function() {
         lastImg = img;
         lastImgW = img.width;
         lastImgH = img.height;
-        // Если есть pendingRoi — применяем его
-        if (pendingRoi) {
-          roiPoints = pendingRoi;
-          pendingRoi = null;
-          roiReceivedFromBackend = true;
-          drawRoi();
-          updateFit();
-        } else if (!roiPoints) {
-          // Ждём ROI от backend 500 мс, если не пришёл — fallback
-          setTimeout(() => {
-            if (!roiPoints && !roiReceivedFromBackend) {
-              roiPoints = getDefaultRoiPoints(img.width, img.height);
-              drawRoi();
-            }
-          }, 500);
-        }
-        updateFit();
+        fitAndDrawImage(img);
+        URL.revokeObjectURL(url);
       };
       img.onerror = function() {
-        setStatus('Ошибка декодирования изображения', true);
+        console.error('Failed to load image');
         lastStats.status = 'Ошибка декодирования';
-        if (lastImg) updateFit();
       };
-      img.src = URL.createObjectURL(blob);
+      img.src = url;
     } else {
-      // Это JSON статистика
+      // Получение метаданных
       try {
         const stats = JSON.parse(event.data);
-        console.log('Received stats:', stats);
+        
+        // Дебаг логи для диагностики проблемы с обновлением
+        const now = Date.now();
+        if (!window.lastStatsUpdate) {
+          window.lastStatsUpdate = now;
+          window.statsUpdateCount = 0;
+          window.statsHistory = [];
+        }
+        
+        window.statsUpdateCount++;
+        const timeSinceLastUpdate = now - window.lastStatsUpdate;
+        
+        // Сохраняем историю обновлений для анализа
+        window.statsHistory.push({
+          timestamp: now,
+          cpu_all: stats.cpu_all,
+          mem_percent: stats.mem_percent,
+          fps: stats.fps,
+          frame_count: stats.frame_count
+        });
+        
+        // Оставляем только последние 50 обновлений
+        if (window.statsHistory.length > 50) {
+          window.statsHistory.shift();
+        }
+        
+        // Логируем каждые 10 обновлений или каждые 5 секунд
+        if (window.statsUpdateCount % 10 === 0 || timeSinceLastUpdate > 5000) {
+          const avgUpdateRate = window.statsHistory.length > 1 ? 
+            (window.statsHistory.length - 1) / ((now - window.statsHistory[0].timestamp) / 1000) : 0;
+          
+          console.log(`[DEBUG] Stats update #${window.statsUpdateCount}:`, {
+            timestamp: stats.timestamp,
+            timeSinceLastUpdate: timeSinceLastUpdate + 'ms',
+            updateRate: (window.statsUpdateCount / (timeSinceLastUpdate / 1000)).toFixed(2) + ' updates/sec',
+            avgUpdateRate: avgUpdateRate.toFixed(2) + ' updates/sec',
+            historySize: window.statsHistory.length,
+            cpu_all: stats.cpu_all,
+            mem_percent: stats.mem_percent,
+            fps: stats.fps,
+            frame_count: stats.frame_count
+          });
+          
+          // Анализируем частоту обновлений
+          if (window.statsHistory.length > 10) {
+            const recentUpdates = window.statsHistory.slice(-10);
+            const intervals = [];
+            for (let i = 1; i < recentUpdates.length; i++) {
+              intervals.push(recentUpdates[i].timestamp - recentUpdates[i-1].timestamp);
+            }
+            const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+            const minInterval = Math.min(...intervals);
+            const maxInterval = Math.max(...intervals);
+            
+            console.log(`[DEBUG] Update intervals analysis:`, {
+              avgInterval: avgInterval.toFixed(0) + 'ms',
+              minInterval: minInterval + 'ms',
+              maxInterval: maxInterval + 'ms',
+              variance: intervals.length > 1 ? 
+                (intervals.reduce((a, b) => a + Math.pow(b - avgInterval, 2), 0) / (intervals.length - 1)).toFixed(0) + 'ms²' : 'N/A'
+            });
+          }
+          
+          window.lastStatsUpdate = now;
+          window.statsUpdateCount = 0;
+        }
+        
         // Если это ROI от backend
         if (stats.type === 'roi' && Array.isArray(stats.points)) {
           roiReceivedFromBackend = true;
@@ -289,8 +492,12 @@ function connectWS() {
   };
 }
 
-startBtn.onclick = () => {
+startBtn.onclick = async () => {
   if (reconnectTimeout) clearTimeout(reconnectTimeout);
+  
+  // Останавливаем предыдущий источник перед подключением к новому
+  await resetVideoState();
+  
   connectWS();
 };
 
@@ -395,19 +602,19 @@ window.addEventListener('DOMContentLoaded', () => {
   const startVideoBtn = document.getElementById('start-video-btn');
   const stopVideoBtn = document.getElementById('stop-video-btn');
   
-  cameraSource.addEventListener('change', () => {
+  cameraSource.addEventListener('change', async () => {
     console.log('[DEBUG] Camera source selected');
     currentSource = 'camera';
     updateSourceControls();
-    resetVideoState();
+    await resetVideoState();
   });
   
-  videoSource.addEventListener('change', () => {
+  videoSource.addEventListener('change', async () => {
     console.log('[DEBUG] Video source selected');
     currentSource = 'video';
     updateSourceControls();
     loadVideoList();
-    resetVideoState();
+    await resetVideoState();
   });
   
   uploadBtn.addEventListener('click', uploadVideo);
@@ -499,6 +706,7 @@ async function uploadVideo() {
     
     if (response.ok) {
       const result = await response.json();
+      console.log('Upload response:', result);
       setStatus(`Видео загружено и сконвертировано: ${result.filename}`, false);
       await loadVideoList();
       fileInput.value = '';
@@ -629,8 +837,32 @@ function updateSourceControls() {
   }
 }
 
-function resetVideoState() {
+async function resetVideoState() {
+  console.log('Resetting video state due to source change');
+  
+  // Останавливаем видео на backend если оно запущено
+  if (currentVideo) {
+    try {
+      console.log('Stopping current video on backend:', currentVideo);
+      const response = await fetch('/api/videos/stop', {
+        method: 'POST'
+      });
+      
+      if (response.ok) {
+        console.log('Video stopped successfully on backend');
+        setStatus('Предыдущий источник остановлен', false);
+      } else {
+        console.warn('Failed to stop video on backend');
+      }
+    } catch (error) {
+      console.error('Error stopping video on backend:', error);
+    }
+  }
+  
+  // Сбрасываем состояние
   currentVideo = null;
+  
+  // Закрываем WebSocket соединение
   if (ws && ws.readyState === 1) {
     console.log('Closing WebSocket connection due to source change');
     manualClose = true;

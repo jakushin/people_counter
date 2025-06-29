@@ -68,11 +68,41 @@ class PersonDetector:
             logging.warning(f"[WARN] Could not set PyTorch threads: {e}")
         try:
             with suppress_all_output():
-                # Используем yolov8m.pt для детекции людей
-                self.model = YOLO('yolov8m.pt')
+                # Используем yolov8s.pt для детекции людей (быстрее чем medium)
+                self.model = YOLO('yolov8s.pt')
         except Exception as e:
             logging.error(f'YOLO model load error: {e}')
             raise
+
+    def calculate_roi_overlap_percentage(self, bbox, roi_points):
+        """
+        Вычисляет процент площади bounding box, которая находится внутри ROI
+        """
+        if roi_points is None or len(roi_points) < 3:
+            return 100.0  # Если ROI не задан, считаем что 100% внутри
+        
+        x1, y1, x2, y2 = bbox
+        bbox_area = (x2 - x1) * (y2 - y1)
+        
+        if bbox_area <= 0:
+            return 0.0
+        
+        # Создаем маску для ROI
+        roi_mask = np.zeros((y2 - y1, x2 - x1), dtype=np.uint8)
+        roi_points_array = np.array(roi_points, dtype=np.int32)
+        
+        # Смещаем точки ROI относительно bbox
+        shifted_roi = roi_points_array - np.array([x1, y1])
+        
+        # Рисуем ROI на маске
+        cv2.fillPoly(roi_mask, [shifted_roi], 255)
+        
+        # Считаем пиксели внутри ROI
+        pixels_inside = np.sum(roi_mask > 0)
+        total_pixels = bbox_area
+        
+        overlap_percentage = (pixels_inside / total_pixels) * 100
+        return overlap_percentage
 
     def detect(self, frame, roi=None):
         try:
@@ -143,26 +173,21 @@ class PersonDetector:
                             verbose_log(f"[FILTER] Skipping bbox {bbox_w}x{bbox_h} (too small/large), min={min_size}, max={max_size}")
                             continue
                         
-                        # Проверка ROI - проверяем все 4 угла bounding box
+                        # Проверка ROI - проверяем процент площади человека внутри ROI
                         if pts is not None:
-                            # Проверяем все 4 угла bounding box
-                            corners = [
-                                (int(x1), int(y1)),  # левый верхний
-                                (int(x2), int(y1)),  # правый верхний  
-                                (int(x2), int(y2)),  # правый нижний
-                                (int(x1), int(y2))   # левый нижний
-                            ]
+                            # Вычисляем процент площади человека внутри ROI
+                            overlap_percentage = self.calculate_roi_overlap_percentage((x1, y1, x2, y2), pts)
                             
-                            # Проверяем, что все углы находятся внутри ROI
-                            all_inside = True
-                            for corner_x, corner_y in corners:
-                                if cv2.pointPolygonTest(pts, (corner_x, corner_y), False) < 0:
-                                    all_inside = False
-                                    break
+                            # Используем пороги: 70% для включения, 30% для исключения
+                            # Если человек был подсвечен в предыдущем кадре и процент > 30%, продолжаем подсвечивать
+                            # Если человек не был подсвечен и процент > 70%, начинаем подсвечивать
                             
-                            if not all_inside:
-                                verbose_log(f"[ROI] Person not fully inside ROI, skipping (corners: {corners})")
+                            # Для простоты используем 70% как единый порог
+                            if overlap_percentage < 70.0:
+                                verbose_log(f"[ROI] Person overlap {overlap_percentage:.1f}% < 70%, skipping (bbox: ({x1},{y1},{x2},{y2}))")
                                 continue
+                            
+                            verbose_log(f"[ROI] Person overlap {overlap_percentage:.1f}% >= 70%, including (bbox: ({x1},{y1},{x2},{y2}))")
                         
                         person_count += 1
                         # Логируем обнаружение людей всегда, так как это важно для диагностики
@@ -317,7 +342,8 @@ class MultiprocessPersonDetector:
         
         while True:
             try:
-                out_idx, result = self.output_queue.get(timeout=2)
+                # Увеличиваем таймаут с 2 до 10 секунд для избежания частых таймаутов
+                out_idx, result = self.output_queue.get(timeout=10)
                 self.result_buffer[out_idx] = result
                 # Логируем получение результатов всегда, так как это важно для диагностики
                 logging.info(f"[MP_RESULT] Received result for frame {out_idx}, buffer size: {len(self.result_buffer)}")
@@ -331,6 +357,13 @@ class MultiprocessPersonDetector:
                 logging.warning(f"[MP_DETECTOR] Timeout waiting for result, frame {idx}, next_send_idx: {self.next_send_idx}")
                 active_workers = sum(1 for w in self.workers if w.is_alive())
                 logging.warning(f"[MP_WORKERS] Active workers: {active_workers}/{len(self.workers)}")
+                
+                # Добавляем больше информации о состоянии очередей при таймауте
+                input_size = self.input_queue.qsize()
+                output_size = self.output_queue.qsize()
+                buffer_size = len(self.result_buffer)
+                logging.warning(f"[MP_TIMEOUT] Queue status - Input: {input_size}, Output: {output_size}, Buffer: {buffer_size}")
+                
                 return self._create_empty_frame(frame.shape[:2]), 0, 0, 0
 
     def _create_empty_frame(self, shape):
