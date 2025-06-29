@@ -381,8 +381,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
                 
-                # Отправляем статистику каждые 5 секунд
-                if now - last_stat_time >= 5.0:
+                # Отправляем статистику каждые 2 секунды
+                if now - last_stat_time >= 2.0:
                     # CPU информация
                     cpu_percent = psutil.cpu_percent(interval=None)
                     cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
@@ -390,25 +390,48 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Память информация
                     mem = psutil.virtual_memory()
                     mem_percent = mem.percent
-                    mem_total_gb = mem.total / (1024**3)
-                    mem_used_gb = mem.used / (1024**3)
-                    mem_available_gb = mem.available / (1024**3)
+                    mem_total_gb = round(mem.total / (1024**3))
+                    mem_used_gb = round(mem.used / (1024**3))
+                    mem_available_gb = round(mem.available / (1024**3))
                     
                     # Диск информация
                     disk = psutil.disk_usage('/')
                     disk_percent = disk.percent
-                    disk_total_gb = disk.total / (1024**3)
-                    disk_used_gb = disk.used / (1024**3)
+                    disk_total_gb = round(disk.total / (1024**3))
+                    disk_used_gb = round(disk.used / (1024**3))
                     
-                    # Диск I/O статистика
+                    # Диск I/O статистика (текущая скорость)
                     disk_io = psutil.disk_io_counters()
                     if disk_io:
-                        disk_read_mb = disk_io.read_bytes / (1024**2)
-                        disk_write_mb = disk_io.write_bytes / (1024**2)
-                        disk_read_count = disk_io.read_count
-                        disk_write_count = disk_io.write_count
+                        # Получаем текущие значения
+                        current_read_bytes = disk_io.read_bytes
+                        current_write_bytes = disk_io.write_bytes
+                        current_read_count = disk_io.read_count
+                        current_write_count = disk_io.write_count
+                        
+                        # Вычисляем скорость относительно предыдущих значений
+                        if hasattr(stream, '_prev_disk_io'):
+                            time_diff = now - stream._prev_disk_io['time']
+                            if time_diff > 0:
+                                read_speed = (current_read_bytes - stream._prev_disk_io['read_bytes']) / time_diff
+                                write_speed = (current_write_bytes - stream._prev_disk_io['write_bytes']) / time_diff
+                                read_latency = (current_read_count - stream._prev_disk_io['read_count']) / time_diff
+                                write_latency = (current_write_count - stream._prev_disk_io['write_count']) / time_diff
+                            else:
+                                read_speed = write_speed = read_latency = write_latency = 0
+                        else:
+                            read_speed = write_speed = read_latency = write_latency = 0
+                        
+                        # Сохраняем текущие значения для следующего расчета
+                        stream._prev_disk_io = {
+                            'time': now,
+                            'read_bytes': current_read_bytes,
+                            'write_bytes': current_write_bytes,
+                            'read_count': current_read_count,
+                            'write_count': current_write_count
+                        }
                     else:
-                        disk_read_mb = disk_write_mb = disk_read_count = disk_write_count = 0
+                        read_speed = write_speed = read_latency = write_latency = 0
                     
                     # Сетевая информация (в Mbps)
                     net_io = psutil.net_io_counters()
@@ -437,16 +460,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         'cpu_all': last_cpu,
                         'cpu_cores': cpu_per_core if 'cpu_per_core' in locals() else [],
                         'mem_percent': last_mem,
-                        'mem_total_gb': round(mem_total_gb, 1) if 'mem_total_gb' in locals() else None,
-                        'mem_used_gb': round(mem_used_gb, 1) if 'mem_used_gb' in locals() else None,
-                        'mem_available_gb': round(mem_available_gb, 1) if 'mem_available_gb' in locals() else None,
+                        'mem_total_gb': mem_total_gb if 'mem_total_gb' in locals() else None,
+                        'mem_used_gb': mem_used_gb if 'mem_used_gb' in locals() else None,
+                        'mem_available_gb': mem_available_gb if 'mem_available_gb' in locals() else None,
                         'disk_percent': disk_percent if 'disk_percent' in locals() else None,
-                        'disk_total_gb': round(disk_total_gb, 1) if 'disk_total_gb' in locals() else None,
-                        'disk_used_gb': round(disk_used_gb, 1) if 'disk_used_gb' in locals() else None,
-                        'disk_read_mb': round(disk_read_mb, 1) if 'disk_read_mb' in locals() else None,
-                        'disk_write_mb': round(disk_write_mb, 1) if 'disk_write_mb' in locals() else None,
-                        'disk_read_count': disk_read_count if 'disk_read_count' in locals() else None,
-                        'disk_write_count': disk_write_count if 'disk_write_count' in locals() else None,
+                        'disk_total_gb': disk_total_gb if 'disk_total_gb' in locals() else None,
+                        'disk_used_gb': disk_used_gb if 'disk_used_gb' in locals() else None,
+                        'disk_read_speed': read_speed if 'read_speed' in locals() else 0,
+                        'disk_write_speed': write_speed if 'write_speed' in locals() else 0,
+                        'disk_read_latency': read_latency if 'read_latency' in locals() else 0,
+                        'disk_write_latency': write_latency if 'write_latency' in locals() else 0,
                         'net_sent_mbps': round(net_sent_mbps, 1) if 'net_sent_mbps' in locals() else None,
                         'net_recv_mbps': round(net_recv_mbps, 1) if 'net_recv_mbps' in locals() else None,
                         'status': 'ok',

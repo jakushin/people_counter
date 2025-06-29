@@ -27,10 +27,10 @@ let lastStats = {
   disk_percent: null,
   disk_total_gb: null,
   disk_used_gb: null,
-  disk_read_mb: null,
-  disk_write_mb: null,
-  disk_read_count: null,
-  disk_write_count: null,
+  disk_read_speed: 0,
+  disk_write_speed: 0,
+  disk_read_latency: 0,
+  disk_write_latency: 0,
   net_sent_mbps: null,
   net_recv_mbps: null,
   status: 'Нет соединения',
@@ -57,6 +57,21 @@ let currentVideo = null;
 function setStatus(msg, error=false) {
   statusDiv.textContent = msg;
   statusDiv.style.color = error ? 'red' : 'green';
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B/s';
+  const k = 1024;
+  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function formatLatency(ops) {
+  if (ops === 0) return '0 ops/s';
+  if (ops < 1) return (ops * 1000).toFixed(1) + ' mops/s';
+  if (ops < 1000) return ops.toFixed(1) + ' ops/s';
+  return (ops / 1000).toFixed(1) + ' kops/s';
 }
 
 function drawOverlay(ctx, stats, w, h) {
@@ -95,11 +110,16 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? stats.cpu_all + '%' : '-'), w-10, y);
   y += lineHeight;
   
-  // CPU по ядрам (все ядра)
+  // CPU по ядрам (все ядра, отсортированные по номеру)
   if (stats.cpu_cores && stats.cpu_cores.length > 0) {
-    for (let i = 0; i < stats.cpu_cores.length; i++) {
+    // Создаем массив с индексами для сортировки
+    const cpuWithIndex = stats.cpu_cores.map((value, index) => ({ value, index }));
+    // Сортируем по индексу (номеру ядра)
+    cpuWithIndex.sort((a, b) => a.index - b.index);
+    
+    for (let i = 0; i < cpuWithIndex.length; i++) {
       ctx.fillStyle = '#ff8e8e';
-      ctx.fillText(`CPU_${i+1}: ${stats.cpu_cores[i]}%`, w-10, y);
+      ctx.fillText(`CPU_${cpuWithIndex[i].index + 1}: ${cpuWithIndex[i].value}%`, w-10, y);
       y += lineHeight;
     }
   }
@@ -119,15 +139,20 @@ function drawOverlay(ctx, stats, w, h) {
   y += lineHeight;
   
   // Диск I/O
-  if (stats.disk_read_mb !== null || stats.disk_write_mb !== null) {
+  if (stats.disk_read_speed > 0 || stats.disk_write_speed > 0) {
     ctx.fillStyle = '#ff9ff3';
-    ctx.fillText('DISK_R: ' + (stats.disk_read_mb !== null ? stats.disk_read_mb + 'MB' : '-'), w-10, y);
+    ctx.fillText('DISK_R: ' + formatBytes(stats.disk_read_speed), w-10, y);
     y += lineHeight;
-    ctx.fillText('DISK_W: ' + (stats.disk_write_mb !== null ? stats.disk_write_mb + 'MB' : '-'), w-10, y);
+    ctx.fillText('DISK_W: ' + formatBytes(stats.disk_write_speed), w-10, y);
     y += lineHeight;
-    ctx.fillText('DISK_RC: ' + (stats.disk_read_count !== null ? stats.disk_read_count : '-'), w-10, y);
+  }
+  
+  // Диск Latency
+  if (stats.disk_read_latency > 0 || stats.disk_write_latency > 0) {
+    ctx.fillStyle = '#ff6b9d';
+    ctx.fillText('DISK_RL: ' + formatLatency(stats.disk_read_latency), w-10, y);
     y += lineHeight;
-    ctx.fillText('DISK_WC: ' + (stats.disk_write_count !== null ? stats.disk_write_count : '-'), w-10, y);
+    ctx.fillText('DISK_WL: ' + formatLatency(stats.disk_write_latency), w-10, y);
     y += lineHeight;
   }
   
