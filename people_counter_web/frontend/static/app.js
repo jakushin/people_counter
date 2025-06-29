@@ -74,6 +74,11 @@ function formatLatency(ops) {
   return (ops / 1000).toFixed(1) + ' kops/s';
 }
 
+function formatMetric(value, unit, maxWidth = 8) {
+  const text = value + unit;
+  return text.padStart(maxWidth);
+}
+
 function drawOverlay(ctx, stats, w, h) {
   ctx.save();
   ctx.font = '12px monospace';
@@ -105,12 +110,13 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, y);
   y += lineHeight;
   
-  // CPU общий
+  // CPU общий (выравнивание по 3 символам)
   ctx.fillStyle = '#ff6b6b';
-  ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? Math.round(stats.cpu_all) + '%' : '-'), w-10, y);
+  const cpuAllText = 'CPU_all: ' + formatMetric(Math.round(stats.cpu_all || 0), '%', 3);
+  ctx.fillText(cpuAllText, w-10, y);
   y += lineHeight;
   
-  // CPU по ядрам (все ядра, отсортированные по номеру)
+  // CPU по ядрам (все ядра, отсортированные по номеру, выравнивание по 3 символам)
   if (stats.cpu_cores && stats.cpu_cores.length > 0) {
     // Создаем массив с индексами для сортировки
     const cpuWithIndex = stats.cpu_cores.map((value, index) => ({ value: Math.round(value), index }));
@@ -119,44 +125,51 @@ function drawOverlay(ctx, stats, w, h) {
     
     for (let i = 0; i < cpuWithIndex.length; i++) {
       ctx.fillStyle = '#ff8e8e';
-      ctx.fillText(`CPU_${cpuWithIndex[i].index + 1}: ${cpuWithIndex[i].value}%`, w-10, y);
+      const cpuText = `CPU_${(cpuWithIndex[i].index + 1).toString().padStart(2)}: ${formatMetric(cpuWithIndex[i].value, '%', 3)}`;
+      ctx.fillText(cpuText, w-10, y);
       y += lineHeight;
     }
   }
   
-  // Память с информацией о размере
+  // Память с информацией о размере (выравнивание по 3 символам)
   ctx.fillStyle = '#4ecdc4';
-  const memText = stats.mem_percent !== null ? 
-    `${Math.round(stats.mem_percent)}% (${stats.mem_used_gb}/${stats.mem_total_gb}GB)` : '-';
-  ctx.fillText('MEM: ' + memText, w-10, y);
+  const memPercent = Math.round(stats.mem_percent || 0);
+  const memText = `MEM: ${formatMetric(memPercent, '%', 3)} (${stats.mem_used_gb}/${stats.mem_total_gb}GB)`;
+  ctx.fillText(memText, w-10, y);
   y += lineHeight;
   
-  // Диск
+  // Диск (выравнивание по 3 символам)
   ctx.fillStyle = '#45b7d1';
-  const diskText = stats.disk_percent !== null ? 
-    `${Math.round(stats.disk_percent)}% (${stats.disk_used_gb}/${stats.disk_total_gb}GB)` : '-';
-  ctx.fillText('DISK: ' + diskText, w-10, y);
+  const diskPercent = Math.round(stats.disk_percent || 0);
+  const diskText = `DISK: ${formatMetric(diskPercent, '%', 3)} (${stats.disk_used_gb}/${stats.disk_total_gb}GB)`;
+  ctx.fillText(diskText, w-10, y);
   y += lineHeight;
   
-  // Диск I/O (всегда показываем)
+  // Диск I/O (всегда показываем, выравнивание по 8 символам)
   ctx.fillStyle = '#ff9ff3';
-  ctx.fillText('DISK_R: ' + formatBytes(stats.disk_read_speed), w-10, y);
+  const diskReadText = 'DISK_R: ' + formatBytes(stats.disk_read_speed).padStart(8);
+  ctx.fillText(diskReadText, w-10, y);
   y += lineHeight;
-  ctx.fillText('DISK_W: ' + formatBytes(stats.disk_write_speed), w-10, y);
+  const diskWriteText = 'DISK_W: ' + formatBytes(stats.disk_write_speed).padStart(8);
+  ctx.fillText(diskWriteText, w-10, y);
   y += lineHeight;
   
-  // Диск Latency (всегда показываем)
+  // Диск Latency (всегда показываем, выравнивание по 8 символам)
   ctx.fillStyle = '#ff6b9d';
-  ctx.fillText('DISK_RL: ' + formatLatency(stats.disk_read_latency), w-10, y);
+  const diskReadLatText = 'DISK_RL: ' + formatLatency(stats.disk_read_latency).padStart(8);
+  ctx.fillText(diskReadLatText, w-10, y);
   y += lineHeight;
-  ctx.fillText('DISK_WL: ' + formatLatency(stats.disk_write_latency), w-10, y);
+  const diskWriteLatText = 'DISK_WL: ' + formatLatency(stats.disk_write_latency).padStart(8);
+  ctx.fillText(diskWriteLatText, w-10, y);
   y += lineHeight;
   
-  // Сеть
+  // Сеть (выравнивание по 4 символам)
   ctx.fillStyle = '#a55eea';
-  ctx.fillText('NET_S: ' + (stats.net_sent_mbps !== null ? Math.round(stats.net_sent_mbps) + 'Mbps' : '-'), w-10, y);
+  const netSentText = 'NET_S: ' + formatMetric(Math.round(stats.net_sent_mbps || 0), 'Mbps', 4);
+  ctx.fillText(netSentText, w-10, y);
   y += lineHeight;
-  ctx.fillText('NET_R: ' + (stats.net_recv_mbps !== null ? Math.round(stats.net_recv_mbps) + 'Mbps' : '-'), w-10, y);
+  const netRecvText = 'NET_R: ' + formatMetric(Math.round(stats.net_recv_mbps || 0), 'Mbps', 4);
+  ctx.fillText(netRecvText, w-10, y);
   y += lineHeight;
   
   // Crop и imgsz

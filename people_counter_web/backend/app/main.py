@@ -433,12 +433,30 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         read_speed = write_speed = read_latency = write_latency = 0
                     
-                    # Сетевая информация (в Mbps, округленная)
+                    # Сетевая информация (текущая скорость в Mbps)
                     net_io = psutil.net_io_counters()
-                    net_sent_mbps = round((net_io.bytes_sent * 8) / (1024**2))  # Convert to Mbps
-                    net_recv_mbps = round((net_io.bytes_recv * 8) / (1024**2))  # Convert to Mbps
+                    current_sent_bytes = net_io.bytes_sent
+                    current_recv_bytes = net_io.bytes_recv
                     
-                    # Сглаживание метрик за 5 секунд
+                    # Вычисляем текущую скорость сети
+                    if hasattr(stream, '_prev_net_io'):
+                        time_diff = now - stream._prev_net_io['time']
+                        if time_diff > 0:
+                            net_sent_mbps = ((current_sent_bytes - stream._prev_net_io['sent_bytes']) * 8) / (1024**2 * time_diff)
+                            net_recv_mbps = ((current_recv_bytes - stream._prev_net_io['recv_bytes']) * 8) / (1024**2 * time_diff)
+                        else:
+                            net_sent_mbps = net_recv_mbps = 0
+                    else:
+                        net_sent_mbps = net_recv_mbps = 0
+                    
+                    # Сохраняем текущие значения для следующего расчета
+                    stream._prev_net_io = {
+                        'time': now,
+                        'sent_bytes': current_sent_bytes,
+                        'recv_bytes': current_recv_bytes
+                    }
+                    
+                    # Сглаживание метрик за 10 секунд (более плавное)
                     if not hasattr(stream, '_metrics_history'):
                         stream._metrics_history = []
                     
@@ -458,8 +476,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     stream._metrics_history.append(current_metrics)
                     
-                    # Оставляем только последние 3 измерения (6 секунд)
-                    if len(stream._metrics_history) > 3:
+                    # Оставляем только последние 5 измерений (10 секунд)
+                    if len(stream._metrics_history) > 5:
                         stream._metrics_history.pop(0)
                     
                     # Вычисляем средние значения
@@ -471,8 +489,8 @@ async def websocket_endpoint(websocket: WebSocket):
                         avg_write_speed = sum(m['write_speed'] for m in stream._metrics_history) / len(stream._metrics_history)
                         avg_read_latency = sum(m['read_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
                         avg_write_latency = sum(m['write_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
-                        avg_net_sent_mbps = round(sum(m['net_sent_mbps'] for m in stream._metrics_history) / len(stream._metrics_history))
-                        avg_net_recv_mbps = round(sum(m['net_recv_mbps'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_net_sent_mbps = sum(m['net_sent_mbps'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_net_recv_mbps = sum(m['net_recv_mbps'] for m in stream._metrics_history) / len(stream._metrics_history)
                         
                         # Для CPU ядер вычисляем среднее по каждому ядру
                         num_cores = len(cpu_per_core)
