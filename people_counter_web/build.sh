@@ -5,6 +5,9 @@
 
 echo "🚀 Начинаем обновление и пересборку..."
 
+# Переходим в нужную директорию
+cd /root/git/people_counter/people_counter_web
+
 # Проверяем, что мы в директории с docker-compose.yml
 if [ ! -f "docker-compose.yml" ]; then
     echo "❌ Ошибка: Необходимо запустить скрипт из директории с docker-compose.yml"
