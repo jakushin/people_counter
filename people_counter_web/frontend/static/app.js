@@ -107,13 +107,13 @@ function drawOverlay(ctx, stats, w, h) {
   
   // CPU общий
   ctx.fillStyle = '#ff6b6b';
-  ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? stats.cpu_all + '%' : '-'), w-10, y);
+  ctx.fillText('CPU_all: ' + (stats.cpu_all !== null ? Math.round(stats.cpu_all) + '%' : '-'), w-10, y);
   y += lineHeight;
   
   // CPU по ядрам (все ядра, отсортированные по номеру)
   if (stats.cpu_cores && stats.cpu_cores.length > 0) {
     // Создаем массив с индексами для сортировки
-    const cpuWithIndex = stats.cpu_cores.map((value, index) => ({ value, index }));
+    const cpuWithIndex = stats.cpu_cores.map((value, index) => ({ value: Math.round(value), index }));
     // Сортируем по индексу (номеру ядра)
     cpuWithIndex.sort((a, b) => a.index - b.index);
     
@@ -127,40 +127,36 @@ function drawOverlay(ctx, stats, w, h) {
   // Память с информацией о размере
   ctx.fillStyle = '#4ecdc4';
   const memText = stats.mem_percent !== null ? 
-    `${stats.mem_percent}% (${stats.mem_used_gb}/${stats.mem_total_gb}GB)` : '-';
+    `${Math.round(stats.mem_percent)}% (${stats.mem_used_gb}/${stats.mem_total_gb}GB)` : '-';
   ctx.fillText('MEM: ' + memText, w-10, y);
   y += lineHeight;
   
   // Диск
   ctx.fillStyle = '#45b7d1';
   const diskText = stats.disk_percent !== null ? 
-    `${stats.disk_percent}% (${stats.disk_used_gb}/${stats.disk_total_gb}GB)` : '-';
+    `${Math.round(stats.disk_percent)}% (${stats.disk_used_gb}/${stats.disk_total_gb}GB)` : '-';
   ctx.fillText('DISK: ' + diskText, w-10, y);
   y += lineHeight;
   
-  // Диск I/O
-  if (stats.disk_read_speed > 0 || stats.disk_write_speed > 0) {
-    ctx.fillStyle = '#ff9ff3';
-    ctx.fillText('DISK_R: ' + formatBytes(stats.disk_read_speed), w-10, y);
-    y += lineHeight;
-    ctx.fillText('DISK_W: ' + formatBytes(stats.disk_write_speed), w-10, y);
-    y += lineHeight;
-  }
+  // Диск I/O (всегда показываем)
+  ctx.fillStyle = '#ff9ff3';
+  ctx.fillText('DISK_R: ' + formatBytes(stats.disk_read_speed), w-10, y);
+  y += lineHeight;
+  ctx.fillText('DISK_W: ' + formatBytes(stats.disk_write_speed), w-10, y);
+  y += lineHeight;
   
-  // Диск Latency
-  if (stats.disk_read_latency > 0 || stats.disk_write_latency > 0) {
-    ctx.fillStyle = '#ff6b9d';
-    ctx.fillText('DISK_RL: ' + formatLatency(stats.disk_read_latency), w-10, y);
-    y += lineHeight;
-    ctx.fillText('DISK_WL: ' + formatLatency(stats.disk_write_latency), w-10, y);
-    y += lineHeight;
-  }
+  // Диск Latency (всегда показываем)
+  ctx.fillStyle = '#ff6b9d';
+  ctx.fillText('DISK_RL: ' + formatLatency(stats.disk_read_latency), w-10, y);
+  y += lineHeight;
+  ctx.fillText('DISK_WL: ' + formatLatency(stats.disk_write_latency), w-10, y);
+  y += lineHeight;
   
   // Сеть
   ctx.fillStyle = '#a55eea';
-  ctx.fillText('NET_S: ' + (stats.net_sent_mbps !== null ? stats.net_sent_mbps + 'Mbps' : '-'), w-10, y);
+  ctx.fillText('NET_S: ' + (stats.net_sent_mbps !== null ? Math.round(stats.net_sent_mbps) + 'Mbps' : '-'), w-10, y);
   y += lineHeight;
-  ctx.fillText('NET_R: ' + (stats.net_recv_mbps !== null ? stats.net_recv_mbps + 'Mbps' : '-'), w-10, y);
+  ctx.fillText('NET_R: ' + (stats.net_recv_mbps !== null ? Math.round(stats.net_recv_mbps) + 'Mbps' : '-'), w-10, y);
   y += lineHeight;
   
   // Crop и imgsz

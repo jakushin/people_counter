@@ -384,8 +384,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 # Отправляем статистику каждые 2 секунды
                 if now - last_stat_time >= 2.0:
                     # CPU информация
-                    cpu_percent = psutil.cpu_percent(interval=None)
-                    cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+                    cpu_percent = round(psutil.cpu_percent(interval=None))
+                    cpu_per_core = [round(x) for x in psutil.cpu_percent(interval=None, percpu=True)]
                     
                     # Память информация
                     mem = psutil.virtual_memory()
@@ -433,17 +433,72 @@ async def websocket_endpoint(websocket: WebSocket):
                     else:
                         read_speed = write_speed = read_latency = write_latency = 0
                     
-                    # Сетевая информация (в Mbps)
+                    # Сетевая информация (в Mbps, округленная)
                     net_io = psutil.net_io_counters()
-                    net_sent_mbps = (net_io.bytes_sent * 8) / (1024**2)  # Convert to Mbps
-                    net_recv_mbps = (net_io.bytes_recv * 8) / (1024**2)  # Convert to Mbps
+                    net_sent_mbps = round((net_io.bytes_sent * 8) / (1024**2))  # Convert to Mbps
+                    net_recv_mbps = round((net_io.bytes_recv * 8) / (1024**2))  # Convert to Mbps
                     
-                    if abs(cpu_percent - last_cpu) > 5 or abs(mem_percent - last_mem) > 5:
-                        last_cpu = cpu_percent
-                        last_mem = mem_percent
+                    # Сглаживание метрик за 5 секунд
+                    if not hasattr(stream, '_metrics_history'):
+                        stream._metrics_history = []
+                    
+                    current_metrics = {
+                        'cpu_all': cpu_percent,
+                        'cpu_cores': cpu_per_core,
+                        'mem_percent': mem_percent,
+                        'disk_percent': disk_percent,
+                        'read_speed': read_speed,
+                        'write_speed': write_speed,
+                        'read_latency': read_latency,
+                        'write_latency': write_latency,
+                        'net_sent_mbps': net_sent_mbps,
+                        'net_recv_mbps': net_recv_mbps,
+                        'timestamp': now
+                    }
+                    
+                    stream._metrics_history.append(current_metrics)
+                    
+                    # Оставляем только последние 3 измерения (6 секунд)
+                    if len(stream._metrics_history) > 3:
+                        stream._metrics_history.pop(0)
+                    
+                    # Вычисляем средние значения
+                    if len(stream._metrics_history) > 0:
+                        avg_cpu_all = round(sum(m['cpu_all'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_mem_percent = round(sum(m['mem_percent'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_disk_percent = round(sum(m['disk_percent'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_read_speed = sum(m['read_speed'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_write_speed = sum(m['write_speed'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_read_latency = sum(m['read_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_write_latency = sum(m['write_latency'] for m in stream._metrics_history) / len(stream._metrics_history)
+                        avg_net_sent_mbps = round(sum(m['net_sent_mbps'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        avg_net_recv_mbps = round(sum(m['net_recv_mbps'] for m in stream._metrics_history) / len(stream._metrics_history))
+                        
+                        # Для CPU ядер вычисляем среднее по каждому ядру
+                        num_cores = len(cpu_per_core)
+                        avg_cpu_cores = []
+                        for core_idx in range(num_cores):
+                            core_avg = sum(m['cpu_cores'][core_idx] for m in stream._metrics_history) / len(stream._metrics_history)
+                            avg_cpu_cores.append(round(core_avg))
+                    else:
+                        # Если нет истории, используем текущие значения
+                        avg_cpu_all = cpu_percent
+                        avg_cpu_cores = cpu_per_core
+                        avg_mem_percent = mem_percent
+                        avg_disk_percent = disk_percent
+                        avg_read_speed = read_speed
+                        avg_write_speed = write_speed
+                        avg_read_latency = read_latency
+                        avg_write_latency = write_latency
+                        avg_net_sent_mbps = net_sent_mbps
+                        avg_net_recv_mbps = net_recv_mbps
+                    
+                    if abs(avg_cpu_all - last_cpu) > 5 or abs(avg_mem_percent - last_mem) > 5:
+                        last_cpu = avg_cpu_all
+                        last_mem = avg_mem_percent
                         last_stat_time = now
                         # Логируем статистику всегда, так как она важна для диагностики
-                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={disk_percent}%')
+                        logging.info(f'[WS] Stats update: CPU={last_cpu}%, MEM={last_mem}%, DISK={avg_disk_percent}%')
                 
                 # Отправляем кадр клиенту
                 try:
@@ -458,20 +513,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         'fps': stats['fps'],
                         'shape': stats['shape'],
                         'cpu_all': last_cpu,
-                        'cpu_cores': cpu_per_core if 'cpu_per_core' in locals() else [],
+                        'cpu_cores': avg_cpu_cores if 'avg_cpu_cores' in locals() else [],
                         'mem_percent': last_mem,
                         'mem_total_gb': mem_total_gb if 'mem_total_gb' in locals() else None,
                         'mem_used_gb': mem_used_gb if 'mem_used_gb' in locals() else None,
                         'mem_available_gb': mem_available_gb if 'mem_available_gb' in locals() else None,
-                        'disk_percent': disk_percent if 'disk_percent' in locals() else None,
+                        'disk_percent': avg_disk_percent if 'avg_disk_percent' in locals() else None,
                         'disk_total_gb': disk_total_gb if 'disk_total_gb' in locals() else None,
                         'disk_used_gb': disk_used_gb if 'disk_used_gb' in locals() else None,
-                        'disk_read_speed': read_speed if 'read_speed' in locals() else 0,
-                        'disk_write_speed': write_speed if 'write_speed' in locals() else 0,
-                        'disk_read_latency': read_latency if 'read_latency' in locals() else 0,
-                        'disk_write_latency': write_latency if 'write_latency' in locals() else 0,
-                        'net_sent_mbps': round(net_sent_mbps, 1) if 'net_sent_mbps' in locals() else None,
-                        'net_recv_mbps': round(net_recv_mbps, 1) if 'net_recv_mbps' in locals() else None,
+                        'disk_read_speed': avg_read_speed if 'avg_read_speed' in locals() else 0,
+                        'disk_write_speed': avg_write_speed if 'avg_write_speed' in locals() else 0,
+                        'disk_read_latency': avg_read_latency if 'avg_read_latency' in locals() else 0,
+                        'disk_write_latency': avg_write_latency if 'avg_write_latency' in locals() else 0,
+                        'net_sent_mbps': avg_net_sent_mbps if 'avg_net_sent_mbps' in locals() else None,
+                        'net_recv_mbps': avg_net_recv_mbps if 'avg_net_recv_mbps' in locals() else None,
                         'status': 'ok',
                         'crop_h': crop_h,
                         'crop_w': crop_w,
