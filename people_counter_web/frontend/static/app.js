@@ -121,11 +121,15 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Размер: ' + (stats.shape ? stats.shape[0]+'x'+stats.shape[1] : '-'), w-10, y);
   y += lineHeight;
   
-  // CPU общий (выравнивание по 3 символам)
+  // CPU общий (выравнивание по 3 символам) - жирный и увеличенный шрифт
   ctx.fillStyle = '#ff6b6b';
+  ctx.font = 'bold 14px monospace'; // Увеличиваем шрифт с 12px до 14px и делаем жирным
   const cpuAllText = 'CPU_all: ' + formatMetric(Math.round(stats.cpu_all || 0), '%', 3);
   ctx.fillText(cpuAllText, w-10, y);
   y += lineHeight;
+  
+  // Возвращаем обычный шрифт для остальных метрик
+  ctx.font = '12px monospace';
   
   // CPU по ядрам (все ядра, отсортированные по номеру, выравнивание по 3 символам)
   if (stats.cpu_cores && stats.cpu_cores.length > 0) {
