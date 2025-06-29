@@ -396,8 +396,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
                 
-                # Отправляем статистику каждые 4 секунды (более плавно)
-                if now - last_stat_time >= 4.0:
+                # Отправляем статистику каждые 2 секунды (в два раза быстрее)
+                if now - last_stat_time >= 2.0:
                     # Дебаг логи для диагностики
                     debug_log(f'[DEBUG] Sending stats update: time_since_last={now - last_stat_time:.1f}s, frame_count={frame_count}')
                     
@@ -474,7 +474,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         'recv_bytes': current_recv_bytes
                     }
                     
-                    # Сглаживание метрик за 10 секунд (более плавное)
+                    # Сглаживание метрик за 6 секунд (3 измерения по 2 секунды)
                     if not hasattr(stream, '_metrics_history'):
                         stream._metrics_history = []
                     
@@ -494,7 +494,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     stream._metrics_history.append(current_metrics)
                     
-                    # Оставляем только последние 3 измерений (12 секунд)
+                    # Оставляем только последние 3 измерений (6 секунд)
                     if len(stream._metrics_history) > 3:
                         stream._metrics_history.pop(0)
                     
