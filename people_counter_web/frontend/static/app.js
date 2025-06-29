@@ -79,6 +79,17 @@ function formatMetric(value, unit, maxWidth = 8) {
   return text.padStart(maxWidth);
 }
 
+function formatFPS(fps) {
+  if (fps === null || fps === undefined) return '   -';
+  const fpsText = fps.toFixed(1);
+  return fpsText.padStart(5); // 5 символов для FPS (например: " 9.5")
+}
+
+function formatDiskMetric(value, formatter) {
+  const formatted = formatter(value);
+  return formatted.padStart(12); // 12 символов для disk метрик
+}
+
 function drawOverlay(ctx, stats, w, h) {
   ctx.save();
   ctx.font = '12px monospace';
@@ -102,8 +113,8 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText('Время: ' + (stats.timestamp ? new Date(stats.timestamp*1000).toLocaleTimeString() : '-'), w-10, y);
   y += lineHeight;
   
-  // FPS
-  ctx.fillText('FPS: ' + (stats.fps ?? '-'), w-10, y);
+  // FPS (выравнивание по 5 символам)
+  ctx.fillText('FPS: ' + formatFPS(stats.fps), w-10, y);
   y += lineHeight;
   
   // Размер кадра
@@ -145,21 +156,21 @@ function drawOverlay(ctx, stats, w, h) {
   ctx.fillText(diskText, w-10, y);
   y += lineHeight;
   
-  // Диск I/O (всегда показываем, выравнивание по 8 символам)
+  // Диск I/O (всегда показываем, выравнивание по 12 символам)
   ctx.fillStyle = '#ff9ff3';
-  const diskReadText = 'DISK_R: ' + formatBytes(stats.disk_read_speed).padStart(8);
+  const diskReadText = 'DISK_R: ' + formatDiskMetric(stats.disk_read_speed, formatBytes);
   ctx.fillText(diskReadText, w-10, y);
   y += lineHeight;
-  const diskWriteText = 'DISK_W: ' + formatBytes(stats.disk_write_speed).padStart(8);
+  const diskWriteText = 'DISK_W: ' + formatDiskMetric(stats.disk_write_speed, formatBytes);
   ctx.fillText(diskWriteText, w-10, y);
   y += lineHeight;
   
-  // Диск Latency (всегда показываем, выравнивание по 8 символам)
+  // Диск Latency (всегда показываем, выравнивание по 12 символам)
   ctx.fillStyle = '#ff6b9d';
-  const diskReadLatText = 'DISK_RL: ' + formatLatency(stats.disk_read_latency).padStart(8);
+  const diskReadLatText = 'DISK_RL: ' + formatDiskMetric(stats.disk_read_latency, formatLatency);
   ctx.fillText(diskReadLatText, w-10, y);
   y += lineHeight;
-  const diskWriteLatText = 'DISK_WL: ' + formatLatency(stats.disk_write_latency).padStart(8);
+  const diskWriteLatText = 'DISK_WL: ' + formatDiskMetric(stats.disk_write_latency, formatLatency);
   ctx.fillText(diskWriteLatText, w-10, y);
   y += lineHeight;
   

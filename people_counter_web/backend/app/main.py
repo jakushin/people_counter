@@ -381,8 +381,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     logging.info(f'[MAIN] Frame {frame_count}: Detect+prep: {detect_time:.3f}s, Time since last send: {time_since_last:.3f}s')
                 last_send_time = now
                 
-                # Отправляем статистику каждые 2 секунды
-                if now - last_stat_time >= 2.0:
+                # Отправляем статистику каждые 4 секунды (более плавно)
+                if now - last_stat_time >= 4.0:
                     # CPU информация
                     cpu_percent = round(psutil.cpu_percent(interval=None))
                     cpu_per_core = [round(x) for x in psutil.cpu_percent(interval=None, percpu=True)]
@@ -476,8 +476,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     
                     stream._metrics_history.append(current_metrics)
                     
-                    # Оставляем только последние 5 измерений (10 секунд)
-                    if len(stream._metrics_history) > 5:
+                    # Оставляем только последние 3 измерений (12 секунд)
+                    if len(stream._metrics_history) > 3:
                         stream._metrics_history.pop(0)
                     
                     # Вычисляем средние значения
