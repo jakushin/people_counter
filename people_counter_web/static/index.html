@@ -1,95 +1,120 @@
+<!-- static/index.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8">
     <title>People Counter</title>
-    <style>
-        body { background-color: #000; color: #fff; font-family: sans-serif; }
-        .video-container { position: relative; display: inline-block; }
-        .diag { position: absolute; top: 10px; right: 10px; text-align: right; background: rgba(0,0,0,0.5); padding: 10px; }
-        .point { position: absolute; width: 16px; height: 16px; background: #f00; border-radius: 50%; cursor: move; }
-    </style>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="video-container">
-        <img id="video" src="/video" style="max-width: 100%;" />
-        <div class="diag" id="diag">
-            FPS: <span id="fps">0</span><br />
-            RES: <span id="res">0x0</span><br />
-            Line: <span id="line">-</span>
-        </div>
-        <div id="point1" class="point"></div>
-        <div id="point2" class="point"></div>
+<div class="video-container" id="container">
+    <img id="video" src="/video" alt="Video stream" />
+    <svg id="overlay"></svg>
+
+    <div class="diag" id="diag">
+        <div>FPS: <span id="fps">0</span></div>
+        <div>DISP: <span id="res_disp">0×0</span></div>
+        <div>SR: <span id="res_stream">0×0</span></div>
+        <div>BR: <span id="br">0</span> kbps</div>
+        <div>COORD: <span id="coords">—</span></div>
     </div>
 
-    <script>
-        async function updateLine() {
-            const resp = await fetch('/get_line');
-            const data = await resp.json();
+    <div id="point1" class="point"></div>
+    <div id="point2" class="point"></div>
+</div>
 
-            const img = document.getElementById('video');
-            const scale = img.clientWidth / 960;
+<script>
+    const container = document.getElementById("container");
+    const img = document.getElementById("video");
+    const overlay = document.getElementById("overlay");
+    const lineEl = document.createElementNS("http://www.w3.org/2000/svg","line");
+    overlay.appendChild(lineEl);
 
-            point1.style.left = (data.line_start[0] * scale - 8) + 'px';
-            point1.style.top  = (data.line_start[1] * scale - 8) + 'px';
-            point2.style.left = (data.line_end[0] * scale - 8) + 'px';
-            point2.style.top  = (data.line_end[1] * scale - 8) + 'px';
+    const pts = [document.getElementById("point1"), document.getElementById("point2")];
+    const elFps = document.getElementById("fps");
+    const elDisp = document.getElementById("res_disp");
+    const elSR   = document.getElementById("res_stream");
+    const elBr   = document.getElementById("br");
+    const elCoord= document.getElementById("coords");
 
-            document.getElementById('line').innerText = `${data.line_start} - ${data.line_end}`;
+    let currentLine = [[0,0],[0,0]];
+    let draggingIdx = null;
+
+    function resizeOverlay(){
+        const cr = container.getBoundingClientRect(), scale = cr.width/960;
+        overlay.setAttribute("width", cr.width);
+        overlay.setAttribute("height", cr.height);
+        overlay.style.width=cr.width+"px";
+        overlay.style.height=cr.height+"px";
+        drawLine(); positionPoints();
+    }
+
+    function drawLine(){
+        const cr = container.getBoundingClientRect(), scale=cr.width/960;
+        const [p1,p2]=currentLine;
+        lineEl.setAttribute("x1", p1[0]*scale);
+        lineEl.setAttribute("y1", p1[1]*scale);
+        lineEl.setAttribute("x2", p2[0]*scale);
+        lineEl.setAttribute("y2", p2[1]*scale);
+    }
+
+    function positionPoints(){
+        const cr = container.getBoundingClientRect(), scale=cr.width/960;
+        currentLine.forEach((p, i)=>{
+            pts[i].style.left = (p[0]*scale - 8) + "px";
+            pts[i].style.top  = (p[1]*scale - 8) + "px";
+        });
+    }
+
+    async function updateDiagnostics(){
+        const {line_start, line_end} = await (await fetch("/get_line")).json();
+        currentLine=[line_start,line_end];
+        elCoord.innerText = `${line_start} → ${line_end}`;
+        const stat = await (await fetch("/get_status")).json();
+        elFps.innerText = stat.fps;
+        elDisp.innerText = stat.resolution_disp;
+        elSR.innerText  = stat.resolution_stream;
+        elBr.innerText  = stat.bitrate;
+        drawLine(); positionPoints();
+    }
+
+    pts.forEach((el, idx)=>{
+        el.addEventListener("mousedown", e=>{
+            e.preventDefault();
+            draggingIdx = idx;
+            document.body.style.cursor="grabbing";
+        });
+    });
+
+    window.addEventListener("mousemove", e=>{
+        if (draggingIdx===null) return;
+        const cr=container.getBoundingClientRect(), scale=cr.width/960;
+        let x=(e.clientX-cr.left)/scale, y=(e.clientY-cr.top)/scale;
+        x=Math.max(0,Math.min(960,x));
+        y=Math.max(0,Math.min(cr.height/scale,y));
+        currentLine[draggingIdx]=[Math.round(x),Math.round(y)];
+        drawLine(); positionPoints();
+    });
+
+    window.addEventListener("mouseup", async ()=>{
+        if (draggingIdx!==null){
+            document.body.style.cursor="";
+            const [p1,p2]=currentLine;
+            const f=new FormData();
+            f.append("x1",p1[0]);f.append("y1",p1[1]);
+            f.append("x2",p2[0]);f.append("y2",p2[1]);
+            await fetch("/set_line",{method:"POST",body:f});
+            await updateDiagnostics();
+            draggingIdx = null;
         }
+    });
 
-        async function updateDiag() {
-            const resp = await fetch('/get_status');
-            const data = await resp.json();
-            document.getElementById('fps').innerText = data.fps;
-            document.getElementById('res').innerText = data.frame_size;
-        }
-
-        function makeDraggable(el, pointName) {
-            el.onmousedown = function(event) {
-                event.preventDefault();
-                document.onmousemove = function(e) {
-                    const img = document.getElementById('video');
-                    const scale = img.clientWidth / 960;
-
-                    let x = (e.pageX - img.offsetLeft) / scale;
-                    let y = (e.pageY - img.offsetTop) / scale;
-                    x = Math.max(0, Math.min(960, x));
-                    y = Math.max(0, y);
-
-                    if (pointName === 'start') {
-                        postLine(Math.round(x), Math.round(y), rtLine[1][0], rtLine[1][1]);
-                    } else {
-                        postLine(rtLine[0][0], rtLine[0][1], Math.round(x), Math.round(y));
-                    }
-                };
-                document.onmouseup = function() {
-                    document.onmousemove = null;
-                    document.onmouseup = null;
-                };
-            };
-        }
-
-        async function postLine(x1, y1, x2, y2) {
-            rtLine = [[x1, y1], [x2, y2]];
-            const form = new FormData();
-            form.append('x1', x1);
-            form.append('y1', y1);
-            form.append('x2', x2);
-            form.append('y2', y2);
-            await fetch('/set_line', { method: 'POST', body: form });
-            updateLine();
-        }
-
-        let rtLine = [[0,0],[0,0]];
-        const point1 = document.getElementById('point1');
-        const point2 = document.getElementById('point2');
-
-        makeDraggable(point1, 'start');
-        makeDraggable(point2, 'end');
-
-        setInterval(updateLine, 1000);
-        setInterval(updateDiag, 1000);
-    </script>
+    window.addEventListener("resize", resizeOverlay);
+    img.onload = ()=>{
+        resizeOverlay();
+        updateDiagnostics();
+        setInterval(updateDiagnostics,1000);
+    };
+</script>
 </body>
 </html>

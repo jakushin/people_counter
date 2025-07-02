@@ -1,35 +1,16 @@
-body {
-    background-color: #222;
-    color: #ddd;
-    font-family: Arial, sans-serif;
-    padding: 20px;
+/* static/style.css */
+.video-container { position: relative; max-width: 960px; margin: auto; }
+.video-container img { width: 100%; display: block; }
+.diag {
+    position: absolute; top: 8px; right: 8px;
+    background: rgba(0,0,0,0.6); color: #fff;
+    padding: 6px 10px; font: 13px sans-serif; border-radius: 4px;
+    text-align: right; z-index: 20;
 }
-
-h2 {
-    color: #ffcc00;
+.point {
+    position: absolute; width: 16px; height: 16px;
+    background: rgba(255,0,0,0.8); border:2px solid #fff; border-radius:50%;
+    cursor: grab; z-index: 30; user-select: none;
 }
-
-.drag-point {
-    width: 12px;
-    height: 12px;
-    background: red;
-    border-radius: 50%;
-    position: absolute;
-    cursor: grab;
-    border: 2px solid white;
-    z-index: 10;
-}
-
-#video-container {
-    position: relative;
-    display: inline-block;
-}
-
-#diagnostics {
-    position: absolute;
-    top: 20px;
-    right: 20px;
-    background: rgba(0,0,0,0.5);
-    color: yellow;
-    padding: 10px;
-}
+svg#overlay { position: absolute; top:0; left:0; z-index:25; pointer-events: none; }
+svg#overlay line { stroke: lime; stroke-width:2; }

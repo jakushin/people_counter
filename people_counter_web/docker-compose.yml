@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  backend:
+    build: ./backend
+    volumes:
+      - ./data:/data
+      - ./videos:/videos
+    ports:
+      - "8000:8000"
+      - "8554:8554"
+    environment:
+      - DEBUG_MODE=false
+      - VERBOSE_MODE=false
+      - LOG_LEVEL=INFO
+    restart: always
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    restart: always
+    depends_on:
+      - backend 
