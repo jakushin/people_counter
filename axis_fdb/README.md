@@ -1,17 +1,19 @@
 # Axis Camera Station Monitoring
 
-Система мониторинга для Axis Camera Station на основе анализа баз данных Firebird.
+Система мониторинга для Axis Camera Station на основе анализа баз данных Firebird и API камер.
 
 ## Описание
 
 Автоматизированная система мониторинга Axis Camera Station, которая:
 1. **Автоматически устанавливает** Firebird 3.0.12 с DevTools
 2. **Настраивает службу** Firebird для автозапуска
-3. **Копирует скрипт мониторинга** в рабочую директорию
-4. **Создает задачу планировщика** для автоматического мониторинга каждую минуту
-5. **Анализирует метрики** записей камер из баз данных Firebird
-6. **Экспортирует метрики** в формате Prometheus для wmi_exporter
-7. **Очищает временные файлы** после каждого запуска
+3. **Настраивает защищенные credentials** для доступа к API камер
+4. **Копирует скрипты мониторинга** в рабочую директорию
+5. **Создает задачу планировщика** для автоматического мониторинга каждые 10 минут
+6. **Анализирует метрики** записей камер из баз данных Firebird
+7. **Собирает метрики** с камер через VAPIX API
+8. **Экспортирует метрики** в формате Prometheus для wmi_exporter
+9. **Очищает временные файлы** после каждого запуска
 
 ## Быстрая установка
 
@@ -21,14 +23,16 @@
 - Права администратора
 - Интернет для скачивания Firebird
 - Axis Camera Station Server
+- Доступ к API камер (username/password)
 
-### Установка (2 минуты)
+### Установка (3 минуты)
 
 1. **Подготовьте файлы:**
    ```
    C:\axis_fdb\
-   ├── install_service.ps1      # Автоматическая установка
-   └── get_metrics.ps1         # Скрипт мониторинга
+   ├── install_service.ps1           # Автоматическая установка
+   ├── get_metrics.ps1              # Скрипт мониторинга БД
+   └── get_cameras_metrics.ps1      # Скрипт мониторинга API камер
    ```
 
 2. **Запустите установку:**
@@ -41,38 +45,47 @@
 **Что произойдет автоматически:**
 - ✅ Скачивание и установка Firebird 3.0.12 x64
 - ✅ Проверка и запуск службы Firebird
-- ✅ Копирование get_metrics.ps1 в C:\windows_exporter\
-- ✅ Создание задачи планировщика (каждую минуту)
+- ✅ Настройка защищенных credentials для API камер
+- ✅ Копирование скриптов в C:\windows_exporter\
+- ✅ Создание задачи планировщика (каждые 10 минут)
 
 ## Структура системы
 
 ### Файлы установки
 - `install_service.ps1` - автоматическая установка и настройка
-- `get_metrics.ps1` - скрипт мониторинга (копируется в C:\windows_exporter\)
+- `get_metrics.ps1` - скрипт мониторинга БД (копируется в C:\windows_exporter\)
+- `get_cameras_metrics.ps1` - скрипт мониторинга API камер (копируется в C:\windows_exporter\)
 
 ### Рабочие директории
 - `C:\windows_exporter\` - директория для метрик (создается автоматически)
 - `C:\temp\axis_monitoring\` - временная директория (создается автоматически)
 - `C:\Program Files\Firebird\Firebird_3_0\` - Firebird (устанавливается автоматически)
+- `C:\ProgramData\AxisCameraStation\` - защищенные credentials (создается автоматически)
 
 ### Задача планировщика
 - **Имя:** "Axis Camera Monitoring"
-- **Запуск:** каждую минуту
+- **Запуск:** каждые 10 минут
 - **Пользователь:** SYSTEM
-- **Скрипт:** `C:\windows_exporter\get_metrics.ps1`
+- **Скрипты:** 
+  - `C:\windows_exporter\get_metrics.ps1`
+  - `C:\windows_exporter\get_cameras_metrics.ps1`
 
 ## Метрики
 
-Скрипт создает файл `C:\windows_exporter\axis_camera_station_metrics.prom` с **18 метриками** в формате Prometheus:
+Система создает два файла метрик в формате Prometheus:
 
-### Базовые метрики
+### 1. Метрики базы данных (`axis_camera_station_metrics.prom`)
+
+**18 метрик** из анализа базы данных Firebird:
+
+#### Базовые метрики
 - `axis_camera_total_cameras` - Общее количество камер
 - `axis_camera_enabled_total` - Количество включенных камер
 - `axis_camera_disabled_total` - Количество отключенных камер
 - `axis_camera_total_recordings` - Общее количество записей
 - `axis_camera_storage_used_bytes` - Общий размер хранилища записей в байтах
 
-### Метрики по камерам
+#### Метрики по камерам
 - `axis_camera_recordings_total_per_camera{camera_id="X",camera_name="Y"}` - Количество записей на камеру
 - `axis_camera_storage_used_bytes_per_camera{camera_id="X",camera_name="Y"}` - Размер хранилища на камеру
 - `axis_camera_last_recording_start_timestamp_seconds{camera_id="X",camera_name="Y"}` - Последнее время начала записи
@@ -80,23 +93,57 @@
 - `axis_camera_oldest_recording_timestamp{camera_id="X",camera_name="Y"}` - Время самой старой записи
 - `axis_camera_retention_days_per_camera{camera_id="X",camera_name="Y"}` - Время хранения в днях
 
-### Метрики по записям
+#### Метрики по записям
 - `axis_camera_incomplete_recordings_total` - Количество незавершенных записей
 - `axis_camera_avg_recording_size_bytes` - Средний размер записи в байтах
 - `axis_camera_avg_recording_duration_seconds` - Средняя длительность записи в секундах
 - `axis_camera_newest_recording_timestamp` - Время самой новой записи
 
-### Метрики по событиям
+#### Метрики по событиям
 - `axis_camera_events_by_category{category="X"}` - Количество событий по категориям
 
-### Метрики по хранилищу
+#### Метрики по хранилищу
 - `axis_camera_recordings_total_by_storage{storage_id="X",storage_name="Y"}` - Количество записей по хранилищам
 - `axis_camera_storage_used_bytes_by_storage{storage_id="X",storage_name="Y"}` - Размер по хранилищам
 
-### Служебные метрики
+#### Служебные метрики
 - `axis_camera_monitoring_last_update` - Время последнего обновления мониторинга
 
+### 2. Метрики API камер (`axis_camera_vapix_metrics.prom`)
+
+**Метрики** собранные через VAPIX API камер:
+
+#### Метрики шифрования SD карт
+- `axis_camera_station_vapix_encryption_enabled{camera_id="X",camera_name="Y",hostname="Z"}` - Включено ли шифрование (0/1)
+- `axis_camera_station_vapix_disk_encrypted{camera_id="X",camera_name="Y",hostname="Z"}` - Зашифрован ли диск (0/1)
+
+#### Метрики размера SD карт
+- `axis_camera_station_vapix_sd_total_size_bytes{camera_id="X",camera_name="Y",hostname="Z"}` - Общий размер SD карты
+- `axis_camera_station_vapix_sd_free_size_bytes{camera_id="X",camera_name="Y",hostname="Z"}` - Свободное место на SD карте
+- `axis_camera_station_vapix_sd_usage_percent{camera_id="X",camera_name="Y",hostname="Z"}` - Процент использования SD карты
+
+#### Метрики политики очистки
+- `axis_camera_station_vapix_sd_cleanup_level{camera_id="X",camera_name="Y",hostname="Z"}` - Уровень очистки
+- `axis_camera_station_vapix_sd_max_age_hours{camera_id="X",camera_name="Y",hostname="Z"}` - Максимальный возраст файлов
+
+#### Метрики статуса
+- `axis_camera_station_vapix_sd_status_ok{camera_id="X",camera_name="Y",hostname="Z"}` - Статус SD карты (0/1)
+- `axis_camera_station_vapix_request_success{camera_id="X",camera_name="Y",hostname="Z"}` - Успешность API запроса (0/1)
+
 **Подробное описание всех метрик:** см. [EXTENDED_METRICS_GUIDE.md](EXTENDED_METRICS_GUIDE.md)
+
+## Безопасность
+
+### Защищенные credentials
+- Credentials для API камер шифруются с помощью Windows Data Protection API
+- Файл credentials: `C:\ProgramData\AxisCameraStation\camera_credentials.dat`
+- Шифрование с областью `LocalMachine` - доступно всем пользователям системы
+- Credentials запрашиваются при каждой установке
+
+### Параллельная обработка
+- Ping проверка камер: до 100 параллельных запросов
+- API запросы к камерам: до 50 параллельных запросов
+- Автоматическое удаление дублирующихся hostname камер
 
 ## Интеграция с wmi_exporter
 
@@ -121,7 +168,7 @@ Restart-Service wmi_exporter
 **По умолчанию логирование отключено** для повышения производительности. 
 
 Для включения логирования:
-1. Откройте файл `get_metrics.ps1`
+1. Откройте файл `get_metrics.ps1` или `get_cameras_metrics.ps1`
 2. Раскомментируйте функции `Write-Log` и `Write-DebugLog`
 3. Раскомментируйте вызовы этих функций по всему скрипту
 
@@ -157,7 +204,28 @@ Test-Path "C:\Program Files\Firebird\Firebird_3_0\isql.exe"
 ```
 **Решение:** База заблокирована Axis Camera Station. Скрипт автоматически копирует базу для работы.
 
-### 4. Задача планировщика не создается
+### 4. Ошибка "Credential file not found"
+```
+ERROR: Credential file not found: C:\ProgramData\AxisCameraStation\camera_credentials.dat
+```
+**Решение:** 
+```powershell
+# Запустите install_service.ps1 для настройки credentials
+.\install_service.ps1
+```
+
+### 5. Ошибка "Unable to find type [System.Security.Cryptography.ProtectedData]"
+```
+ERROR: Failed to load System.Security assembly
+```
+**Решение:** 
+```powershell
+# Проверьте версию PowerShell
+$PSVersionTable.PSVersion
+# Обновите PowerShell до версии 5.1+
+```
+
+### 6. Задача планировщика не создается
 ```
 Register-ScheduledTask : The task XML contains a value which is incorrectly formatted
 ```
@@ -170,7 +238,7 @@ Unregister-ScheduledTask -TaskName "Axis Camera Monitoring" -Confirm:$false
 # Запустите install_service.ps1 снова
 ```
 
-### 5. Файл метрик пустой или не создается
+### 7. Файл метрик пустой или не создается
 ```
 Файл axis_camera_station_metrics.prom пустой или не создается
 ```
@@ -184,7 +252,13 @@ Get-Content "C:\windows_exporter\axis_camera_station_metrics.prom"
 powershell.exe -ExecutionPolicy Bypass -File "C:\windows_exporter\get_metrics.ps1"
 ```
 
-### 6. Ошибка "Execution policy"
+### 8. Ошибка "expected float as value, got 'true'"
+```
+Error parsing "C:\\windows_exporter\\axis_camera_vapix_metrics.prom": text format parsing error
+```
+**Решение:** Обновите скрипт `get_cameras_metrics.ps1` до последней версии, где булевы значения конвертируются в числовые (0/1).
+
+### 9. Ошибка "Execution policy"
 ```
 Set-ExecutionPolicy : Access to the registry key 'HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\PowerShell\1\ShellIds\Microsoft.PowerShell' is denied.
 ```
@@ -205,38 +279,46 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine
 ```powershell
 mkdir C:\temp\axis_monitoring -Force
 mkdir C:\windows_exporter -Force
+mkdir C:\ProgramData\AxisCameraStation -Force
 ```
 
-### 3. Скопируйте скрипт
+### 3. Скопируйте скрипты
 ```powershell
 Copy-Item get_metrics.ps1 C:\windows_exporter\
+Copy-Item get_cameras_metrics.ps1 C:\windows_exporter\
 ```
 
 ### 4. Создайте задачу в планировщике
 ```powershell
-$action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\windows_exporter\get_metrics.ps1"
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1) -RepetitionDuration (New-TimeSpan -Days 365)
+$action1 = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\windows_exporter\get_metrics.ps1"
+$action2 = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\windows_exporter\get_cameras_metrics.ps1"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 
-Register-ScheduledTask -TaskName "Axis Camera Monitoring" -Action $action -Trigger $trigger -Settings $settings -Principal $principal
+Register-ScheduledTask -TaskName "Axis Camera Monitoring" -Action $action1, $action2 -Trigger $trigger -Settings $settings -Principal $principal
 ```
 
 ## Тестирование
 
-### Запустите скрипт вручную
+### Запустите скрипты вручную
 ```powershell
+# Тест метрик БД
 powershell.exe -ExecutionPolicy Bypass -File "C:\windows_exporter\get_metrics.ps1"
+
+# Тест метрик API камер
+powershell.exe -ExecutionPolicy Bypass -File "C:\windows_exporter\get_cameras_metrics.ps1"
 ```
 
 ### Проверьте результат
 ```powershell
 Get-Content C:\windows_exporter\axis_camera_station_metrics.prom
+Get-Content C:\windows_exporter\axis_camera_vapix_metrics.prom
 ```
 
 ## Документация
 
-- [QUICK_START.md](QUICK_START.md) - Быстрый старт (2 минуты)
+- [QUICK_START.md](QUICK_START.md) - Быстрый старт (3 минуты)
 - [EXTENDED_METRICS_GUIDE.md](EXTENDED_METRICS_GUIDE.md) - Подробное описание метрик
 - [DEBUG_GUIDE.md](DEBUG_GUIDE.md) - Включение логирования
 - [DATABASE_STRUCTURE.md](DATABASE_STRUCTURE.md) - Структура баз данных
@@ -245,7 +327,8 @@ Get-Content C:\windows_exporter\axis_camera_station_metrics.prom
 
 После успешной установки вы получите:
 - **Автоматическую установку Firebird** с DevTools
-- **Мониторинг каждую минуту** через планировщик задач
-- **18 метрик** в формате Prometheus
+- **Защищенные credentials** для API камер
+- **Мониторинг каждые 10 минут** через планировщик задач
+- **18 метрик БД** + **метрики API камер** в формате Prometheus
 - **Интеграцию с wmi_exporter** для сбора метрик
-- **Автоматическое обновление** файла метрик 
+- **Параллельную обработку** для высокой производительности 
