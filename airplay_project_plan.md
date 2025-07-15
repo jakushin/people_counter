@@ -1,10 +1,11 @@
-# Airplay Project Plan
+# airplay_project_plan.md
 
 ## 🎯 Project Overview
-
 This project implements an AirPlay receiver application that emulates an Apple TV device. The system is designed to run on **Ubuntu Server 24.04**, deployed in a **VM within Proxmox 8.4**. The application allows an **iPhone 16 Pro (iOS 16)** to discover it over AirPlay, stream video/audio content to it, and exposes a **web interface** for:
 
-✅ Real-time display of the AirPlay stream in a browser. ✅ Starting/stopping recording of the incoming stream into `.mp4` files. ✅ Browsing, playing, and downloading recorded videos.
+✅ Real-time display of the AirPlay stream in a browser.
+✅ Starting/stopping recording of the incoming stream into `.mp4` files.
+✅ Browsing, playing, and downloading recorded videos.
 
 All components will run as **separate Docker containers** orchestrated by Docker Compose.
 
@@ -12,60 +13,158 @@ All components will run as **separate Docker containers** orchestrated by Docker
 
 ## 🖥 System Architecture
 
-The application is composed of four major parts:
-
+### Components
 1. **AirPlay Receiver (UxPlay):**
-
    - Acts as a virtual Apple TV.
    - Discovers iPhones over mDNS (Bonjour) using **Avahi**.
    - Decodes video/audio streams received from iOS devices.
    - Based on [UxPlay](https://github.com/FDH2/UxPlay), a mature open-source AirPlay implementation for Unix systems.
 
 2. **Media Transcoder (FFmpeg):**
-
    - Captures the framebuffer video and loopback audio output from UxPlay.
    - Streams video to the frontend in real-time using **MJPEG** or **HLS**.
    - Records incoming streams into `.mp4` files on disk.
    - Reference: [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
 
 3. **Web Backend (API):**
-
-   - Provides a REST API for frontend to start/stop recording.
+   - Provides a REST API for frontend to control recording and fetch metadata.
    - Serves the live stream and recorded media.
-   - Manages processes for FFmpeg.
-   - Implemented in Go or Rust for performance.
+   - Manages FFmpeg processes.
 
 4. **Web Frontend (UI):**
-
    - A React or Svelte single-page app.
    - Displays the live stream.
    - Provides controls for recording and browsing past recordings.
 
 ---
 
-## ⚙ Technical Constraints
+## 📡 API Specification
 
-- **Network:**
+### `POST /api/record/start`
+- **Description:** Start recording the current AirPlay stream.
+- **Request Body (JSON):**
+  ```json
+  {
+    "filename": "airplay-20250715-204500.mp4",  // optional, auto-generate if not provided
+    "quality": "high"                           // optional: "high" (default), "medium", "low"
+  }
+  ```
+- **Response (JSON):**
+  ```json
+  {
+    "status": "recording",
+    "file": "airplay-20250715-204500.mp4",
+    "startedAt": "2025-07-15T20:45:00Z"
+  }
+  ```
+- **Errors:**
+  - 409 Conflict: "Recording already in progress."
+  - 500 Internal Server Error: "Failed to start recording."
 
-  - AirPlay relies on mDNS (Bonjour), which requires multicast support.
-  - The AirPlay receiver container will use `network_mode: host` to ensure the iPhone can discover it.
-  - Web frontend should be accessible over the Internet.
+### `POST /api/record/stop`
+- **Description:** Stop the current recording.
+- **Response (JSON):**
+  ```json
+  {
+    "status": "stopped",
+    "file": "airplay-20250715-204500.mp4",
+    "duration": 45.3  // seconds
+  }
+  ```
+- **Errors:**
+  - 400 Bad Request: "No active recording to stop."
 
-- **Recording Path:**
+### `GET /api/records`
+- **Description:** Get a list of recorded video files.
+- **Response (JSON):**
+  ```json
+  [
+    {
+      "filename": "airplay-20250715-204500.mp4",
+      "size": 12345678, // bytes
+      "duration": 120.5, // seconds
+      "createdAt": "2025-07-15T20:45:00Z"
+    },
+    {
+      "filename": "airplay-20250716-101200.mp4",
+      "size": 9876543,
+      "duration": 90.0,
+      "createdAt": "2025-07-16T10:12:00Z"
+    }
+  ]
+  ```
 
-  - All recordings saved in `/var/airplay-records`.
-  - Filename format: `airplay-YYYYMMDD-HHMMSS.mp4`.
+### Authentication
+- **Authentication is not required** for this project.
+- Both API and web UI are designed to be accessible without any login or authorization.
 
-- **Dependencies:**
+---
 
-  - AirPlay: [UxPlay](https://github.com/FDH2/UxPlay)
-  - mDNS: [Avahi](https://avahi.org/)
-  - Media processing: [FFmpeg](https://ffmpeg.org/)
+## 🎨 UI/UX Design
 
-- **Reuse of Libraries:**
+### Live Stream Page
+- Video player showing the AirPlay stream.
+- Record toggle button:
+  - Label: "Start Recording" → "Stop Recording".
+  - Recording indicator (red dot) when active.
+- Link to **Gallery** page.
 
-  - Must rely on existing libraries and projects (UxPlay, FFmpeg).
-  - Avoid reinventing AirPlay or mDNS protocols.
+### Gallery Page
+- List of recorded files:
+  - Filename, duration, size.
+  - Play button to watch inline.
+  - Download button.
+
+*(Low-fidelity mockups to be added in `/ui-mockups/` directory.)*
+
+---
+
+## 🛡️ Error Handling & Edge Cases
+- If FFmpeg fails to start:
+  - API returns 500 error with message "FFmpeg process failed."
+  - Log the exact command and error output.
+- If disk space is low:
+  - Reject new recording requests with 507 Insufficient Storage.
+- If multiple iPhones connect:
+  - **Support only one AirPlay stream at a time.**
+  - Return 409 Conflict if a second stream is attempted.
+
+---
+
+## 📜 Logging Requirements
+- Log all key operations in structured JSON format.
+  Example:
+  ```json
+  {
+    "timestamp": "2025-07-15T20:45:00Z",
+    "level": "info",
+    "event": "recording_started",
+    "filename": "airplay-20250715-204500.mp4"
+  }
+  ```
+- Levels: info, warning, error, debug.
+- Log AirPlay connections/disconnections, API calls, and FFmpeg errors.
+
+---
+
+## ✅ Testing Requirements
+- Unit tests for backend API handlers.
+- Mock FFmpeg process for API tests.
+- Frontend tests for UI state changes (record button, gallery list).
+- Integration tests to simulate an AirPlay connection.
+- Minimal test coverage: **80%** of backend code.
+
+---
+
+## ⚡ Scalability
+- **Support only one AirPlay stream at a time.**
+- No multi-stream support is planned in the initial version.
+
+---
+
+## ⚙ Backend Language
+- **Preferred:** Go (due to simpler concurrency model, smaller binary size).
+- Rust can be considered if existing team expertise is stronger there.
 
 ---
 
@@ -98,79 +197,9 @@ volumes:
   airplay-records:
 ```
 
-- **AirPlay Service:** Uses host network for mDNS and exposes AirPlay service via Avahi.
-- **Web Service:** Serves frontend and APIs; accessible via `http://<host-ip>:8080`.
-- **Shared Volume:** `airplay-records` volume is shared to store recorded files.
-
----
-
-## 🚀 Implementation Plan (Split into Stages)
-
-1. **Prototype AirPlay Receiver:**
-
-   - Build UxPlay in a Docker container.
-   - Test mDNS discovery from iPhone.
-   - Validate video rendering to framebuffer (`/dev/fb0`) and audio output to ALSA loopback.
-
-2. **Add Media Capture:**
-
-   - Use FFmpeg to read `/dev/fb0` and loopback audio.
-   - Stream video in real-time using MJPEG over HTTP.
-   - Test latency and optimize buffer sizes.
-
-3. **Backend API:**
-
-   - Implement endpoints:
-     - `POST /api/record/start`
-     - `POST /api/record/stop`
-     - `GET /api/records`
-   - Integrate with FFmpeg to control recording processes.
-
-4. **Frontend:**
-
-   - Create UI with React/Svelte.
-   - Display MJPEG stream (`<img src="/stream.mjpeg">`).
-   - Add buttons to start/stop recording and list recorded files.
-
-5. **Packaging and Deployment:**
-
-   - Write `deploy.sh` to:
-     - Stop/remove all containers and images.
-     - Clean volumes and cache.
-     - Install host dependencies.
-     - Rebuild and start containers.
-
----
-
-## 📝 Best Practices
-
-1. **Modularity:**
-
-   - Split code into small, testable modules.
-   - Avoid large monolithic files (split backend, frontend, and service logic).
-
-2. **Cursor Rules:**
-
-   - Always break tasks into smaller sub-tasks.
-   - Keep source files small and focused.
-   - Maintain strict separation between backend and frontend concerns.
-
-3. **Testing:**
-
-   - Add logs for key operations.
-   - Test AirPlay discovery and streaming on multiple devices.
-
-4. **External References:**
-
-   - UxPlay GitHub: [https://github.com/FDH2/UxPlay](https://github.com/FDH2/UxPlay)
-   - FFmpeg Filters: [https://ffmpeg.org/ffmpeg-filters.html](https://ffmpeg.org/ffmpeg-filters.html)
-   - Avahi Tutorial: [https://wiki.archlinux.org/title/Avahi](https://wiki.archlinux.org/title/Avahi)
-   - Docker Networking: [https://docs.docker.com/network/](https://docs.docker.com/network/)
-
 ---
 
 ## 📂 Deployment Script Example
-
 ```bash
 #!/bin/bash
 echo "Stopping and cleaning up Docker..."
