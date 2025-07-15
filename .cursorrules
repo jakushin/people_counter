@@ -2,3 +2,27 @@
 
 - Before responding to any user query, read and follow the instructions in `.cursor/rules/rules.mdc`.
 - Apply these rules consistently across all interactions, including chats, code suggestions, and task management.
+
+# .cursorrules
+
+- Before responding to any user query, read and follow the technical specification in `airplay_project_plan.md`.
+- Apply these rules consistently across all interactions, including chats, code suggestions, and task management.
+- Split all development work into **small, well-defined sub-tasks**.
+- Keep all source code files **small and modular** to simplify debugging and maintenance.
+- Use **clear separation of concerns**: backend logic, frontend UI, and service orchestration should not be mixed.
+- Avoid large monolithic files; instead, break logic into multiple smaller files and components.
+- Use only **existing open-source libraries** where possible. Do not attempt to reimplement AirPlay or mDNS protocols from scratch. Leverage tools like [UxPlay](https://github.com/FDH2/UxPlay), [FFmpeg](https://ffmpeg.org/), and [Avahi](https://avahi.org/).
+- All services must run in separate Docker containers managed by Docker Compose.
+- The AirPlay container must use `network_mode: host` to ensure mDNS/Bonjour works in the local network.
+- The web container can use bridge networking with port mappings for external access.
+- Provide a `deploy.sh` script that:
+  - Stops and removes all project containers and images.
+  - Cleans up related Docker volumes and cache.
+  - Installs necessary host dependencies.
+  - Rebuilds and restarts the project.
+- Backend (Go/Rust): Idiomatic, modular, RESTful API design.
+- Frontend (React/Svelte): Component-based design, reusable UI elements.
+- Document all API endpoints clearly.
+- Add logging for critical operations (e.g., AirPlay start/stop, recording state).
+- Write tests for individual modules where possible.
+- Tasks should remain atomic and generate concise outputs to maintain project quality.
