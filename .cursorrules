@@ -1,0 +1,4 @@
+# Cursor System Instructions
+
+- Before responding to any user query, read and follow the instructions in `.cursor/rules/rules.mdc`.
+- Apply these rules consistently across all interactions, including chats, code suggestions, and task management.
