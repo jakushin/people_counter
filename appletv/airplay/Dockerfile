@@ -7,6 +7,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     avahi-daemon \
     uxplay \
+    mc \
+    tcpdump \
+    htop \
+    net-tools \
+    avahi-utils \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-bad \
+    gstreamer1.0-plugins-ugly \
+    gstreamer1.0-libav \
+    gstreamer1.0-tools \
+    gstreamer1.0-x \
+    gstreamer1.0-alsa \
+    gstreamer1.0-pulseaudio \
     xvfb \
     alsa-utils \
     unclutter \
@@ -29,6 +43,8 @@ RUN apt-get update && apt-get install -y \
     pulseaudio \
     libnss3 \
     libgl1-mesa-dri \
+    libgles2-mesa-dev \
+    libegl1-mesa-dev \
     mesa-utils \
     && rm -rf /var/lib/apt/lists/*
 
