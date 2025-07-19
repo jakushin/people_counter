@@ -99,8 +99,8 @@ echo "Logs directory is ready."
 
 echo "Stopping and cleaning up Docker..."
 docker compose down
-docker system prune -af
-docker volume prune -f
+#docker system prune -af
+#docker volume prune -f
 
 echo "Rebuilding and starting containers..."
 docker compose build --no-cache
