@@ -47,200 +47,238 @@ export default function WebRTCStream() {
 
   // Функция автопереподключения с обратным отсчетом
   const startAutoReconnectCountdown = () => {
+    console.log('🚨 [DIAG] startAutoReconnectCountdown() CALLED');
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('Auto-reconnect Countdown', 'startAutoReconnectCountdown() function called');
+    }
+    
     if (autoReconnectTimeoutRef.current) {
+      console.log('🚨 [DIAG] Clearing existing countdown timer');
       clearTimeout(autoReconnectTimeoutRef.current);
     }
     
-    let secondsLeft = 5;
-    setAutoReconnectCountdown(secondsLeft);
-    
+    setAutoReconnectCountdown(5);
+    console.log('🚨 [DIAG] Countdown set to 5 seconds');
+
     const countdown = () => {
-      secondsLeft--;
-      setAutoReconnectCountdown(secondsLeft);
-      
-      if (secondsLeft <= 0) {
-        setAutoReconnectCountdown(null);
+      console.log('🚨 [DIAG] countdown() function called');
+      setAutoReconnectCountdown(prev => {
+        console.log(`🚨 [DIAG] Countdown tick: ${prev} -> ${prev - 1}`);
+        const newCount = prev - 1;
         
-        // Финальная проверка перед автопереподключением
-        const isWebRTCWorking = pcRef.current && 
-          (pcRef.current.connectionState === 'connected' || 
-           pcRef.current.iceConnectionState === 'connected') &&
-          status === 'connected';
-           
-        const isVideoWorking = videoRef.current && 
-          videoRef.current.srcObject && 
-          videoRef.current.srcObject.getTracks().length > 0;
-        
-                 if (isWebRTCWorking || isVideoWorking) {
-           console.log('🚫 COUNTDOWN FINAL CHECK: WebRTC/Video working - CANCELLING auto-reconnection');
-           setServerStatus('Auto-reconnection cancelled - WebRTC already working');
-           
-           // Log countdown cancellation
-           if (window.debugLogUserAction) {
-             window.debugLogUserAction('Auto-reconnect Cancelled', 'Final check detected working WebRTC - countdown cancelled');
-           }
-           
-           return;
-         }
-        
-        console.log('✅ COUNTDOWN FINAL CHECK: WebRTC not working - proceeding with auto-reconnection');
-        console.log('WebRTC Debug: Auto-reconnecting after countdown');
-        
-        // Log automatic reconnection
-        if (window.debugLogUserAction) {
-          window.debugLogUserAction('Auto-reconnect Triggered', 'System automatically reconnecting after 5 second countdown');
+        if (newCount <= 0) {
+          console.log('🚨 [DIAG] COUNTDOWN REACHED ZERO - Starting final check');
+          
+          // Final check before auto-reconnection
+          const isWebRTCWorking = pcRef.current && 
+            pcRef.current.connectionState === 'connected';
+          const isVideoWorking = videoRef.current && 
+            videoRef.current.srcObject && 
+            videoRef.current.srcObject.getTracks().length > 0;
+          
+          console.log(`🚨 [DIAG] FINAL CHECK RESULTS:`);
+          console.log(`  - isWebRTCWorking: ${isWebRTCWorking}`);
+          console.log(`  - isVideoWorking: ${isVideoWorking}`);
+          console.log(`  - pcRef.current: ${pcRef.current ? 'exists' : 'null'}`);
+          console.log(`  - pcRef.connectionState: ${pcRef.current?.connectionState}`);
+          console.log(`  - videoRef.current: ${videoRef.current ? 'exists' : 'null'}`);
+          console.log(`  - videoRef.srcObject: ${videoRef.current?.srcObject ? 'exists' : 'null'}`);
+          console.log(`  - video tracks count: ${videoRef.current?.srcObject?.getTracks().length || 0}`);
+          
+          if (window.debugLogUserAction) {
+            window.debugLogUserAction('Auto-reconnect Final Check', 
+              `WebRTC: ${isWebRTCWorking}, Video: ${isVideoWorking}, PC: ${pcRef.current?.connectionState}, Tracks: ${videoRef.current?.srcObject?.getTracks().length || 0}`);
+          }
+          
+          if (isWebRTCWorking || isVideoWorking) {
+            console.log('🚫 [DIAG] COUNTDOWN FINAL CHECK: WebRTC/Video working - CANCELLING auto-reconnection');
+            setServerStatus('Auto-reconnection cancelled - WebRTC already working');
+            
+            // Log countdown cancellation
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('Auto-reconnect Cancelled', 'Final check detected working WebRTC - countdown cancelled');
+            }
+            
+            return null; // Reset countdown
+          }
+          
+          console.log('✅ [DIAG] COUNTDOWN FINAL CHECK: WebRTC not working - proceeding with auto-reconnection');
+          console.log('🚀 [DIAG] CALLING startWebRTCWithExistingSocket()');
+          
+          // Log automatic reconnection
+          if (window.debugLogUserAction) {
+            window.debugLogUserAction('Auto-reconnect Triggered', 'System automatically reconnecting after 5 second countdown');
+          }
+          
+          // Use existing WebSocket for auto-reconnection instead of creating new one
+          startWebRTCWithExistingSocket();
+          return null; // Reset countdown
+        } else {
+          console.log(`🚨 [DIAG] Scheduling next countdown tick for ${newCount}s`);
+          autoReconnectTimeoutRef.current = setTimeout(countdown, 1000);
+          return newCount;
         }
-        
-        // Use existing WebSocket for auto-reconnection instead of creating new one
-        startWebRTCWithExistingSocket();
-      } else {
-        autoReconnectTimeoutRef.current = setTimeout(countdown, 1000);
-      }
+      });
     };
     
+    console.log('🚨 [DIAG] Starting initial countdown timer');
     autoReconnectTimeoutRef.current = setTimeout(countdown, 1000);
   };
 
   // Функция отмены автопереподключения
   const cancelAutoReconnect = () => {
+    console.log('🚫 [DIAG] cancelAutoReconnect() CALLED');
+    console.log(`🚫 [DIAG] Current countdown: ${autoReconnectCountdown}`);
+    console.log(`🚫 [DIAG] Timeout ref exists: ${!!autoReconnectTimeoutRef.current}`);
+    
     // Log user action if called manually (not automatically)
     if (autoReconnectCountdown !== null && window.debugLogUserAction) {
       window.debugLogUserAction('Cancel Auto-reconnect', `Cancelled with ${autoReconnectCountdown} seconds remaining`);
     }
     
     if (autoReconnectTimeoutRef.current) {
+      console.log('🚫 [DIAG] Clearing timeout');
       clearTimeout(autoReconnectTimeoutRef.current);
       autoReconnectTimeoutRef.current = null;
     }
     setAutoReconnectCountdown(null);
-    console.log('WebRTC Debug: Auto-reconnect cancelled by user');
+    console.log('🚫 [DIAG] Auto-reconnect cancelled by user');
   };
 
   // Функция auto-reconnection с существующим WebSocket 
   const startWebRTCWithExistingSocket = async () => {
-    if (isConnecting) return;
+    console.log('🚀 [DIAG] startWebRTCWithExistingSocket() CALLED');
+    console.log(`🚀 [DIAG] Current state - isConnecting: ${isConnecting}, status: ${status}`);
+    console.log(`🚀 [DIAG] WebSocket state: ${wsRef.current ? wsRef.current.readyState : 'null'}`);
+    
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('Auto-reconnect With Existing Socket', 
+        `Called with isConnecting: ${isConnecting}, WS state: ${wsRef.current?.readyState}`);
+    }
+    
+    if (isConnecting) {
+      console.log('🚫 [DIAG] BLOCKED: isConnecting is already true');
+      return;
+    }
     
     // Check if we have an active WebSocket connection
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      console.log('WebRTC Debug: No active WebSocket for auto-reconnection, creating new connection');
+      console.log('🚫 [DIAG] No active WebSocket for auto-reconnection, creating new connection');
+      console.log('🔄 [DIAG] FALLBACK: Calling startWebRTC() instead');
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Auto-reconnect Fallback', 'No active WebSocket, falling back to startWebRTC()');
+      }
       startWebRTC();
       return;
     }
     
-    console.log('WebRTC Debug: Starting WebRTC auto-reconnection with existing WebSocket connection');
+    console.log('✅ [DIAG] Starting WebRTC auto-reconnection with existing WebSocket connection');
     setIsConnecting(true);
     setStatusWithLog('connecting');
     setError(null);
 
     try {
+      console.log('🔧 [DIAG] Creating new RTCPeerConnection...');
       // Use existing WebSocket connection (don't create new one!)
-      const websocket = wsRef.current;
-
-      // Clean up old PeerConnection before creating new one
+      
+      // Close existing peer connection if any
       if (pcRef.current) {
-        console.log('WebRTC Debug: Closing old PeerConnection for auto-reconnection');
+        console.log('🔧 [DIAG] Closing existing PeerConnection');
         pcRef.current.close();
-        pcRef.current = null;
       }
-
-      // Create new PeerConnection for the reconnection
+      
+      // Простая конфигурация для host network режима
       const config = {
-        iceServers: [], // В host режиме STUN серверы не нужны
-        iceCandidatePoolSize: 0, // Не генерируем кандидаты заранее
-        iceTransportPolicy: 'all' // Разрешаем все типы кандидатов
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+        ]
       };
       
       const peerConnection = new RTCPeerConnection(config);
       pcRef.current = peerConnection;
+      console.log('✅ [DIAG] New PeerConnection created');
 
       // Set up the same WebRTC handlers as in startWebRTC
       peerConnection.onconnectionstatechange = () => {
         const state = peerConnection.connectionState;
         setConnectionState(state);
-        console.log('WebRTC connection state:', state);
+        console.log(`🔄 [DIAG] WebRTC connection state: ${state}`);
         
         if (state === 'connected') {
           setStatusWithLog('connected');
           setError(null);
           setServerStatus(null);
-          console.log('WebRTC connected successfully!');
-        } else if (state === 'failed' || state === 'disconnected') {
-          setStatusWithLog('failed');
-          setError('WebRTC connection failed');
-          setIsConnecting(false);
-          console.error('WebRTC connection failed or disconnected');
-        } else if (state === 'closed') {
-          setStatusWithLog('stopped');
-          setIsConnecting(false);
-          console.log('WebRTC connection closed');
+          console.log('✅ [DIAG] WebRTC connected successfully!');
+          if (window.debugLogUserAction) {
+            window.debugLogUserAction('Auto-reconnect Success', 'WebRTC auto-reconnection successful');
+          }
         }
+        setIsConnecting(false);
       };
-      
+
       peerConnection.oniceconnectionstatechange = () => {
-        const iceState = peerConnection.iceConnectionState;
-        setIceConnectionState(iceState);
-        console.log(`WebRTC Debug: ICE connection state: ${iceState}`);
-        
-        if (iceState === 'failed') {
-          setError('Network connection failed (ICE)');
-          console.log('WebRTC Debug: ICE connection failed - network issues');
-        } else if (iceState === 'connected') {
-          console.log('WebRTC Debug: ICE connection established successfully');
-        }
+        const state = peerConnection.iceConnectionState;
+        setIceConnectionState(state);
+        console.log(`🧊 [DIAG] ICE connection state: ${state}`);
       };
-      
+
       peerConnection.onicegatheringstatechange = () => {
-        const gatheringState = peerConnection.iceGatheringState;
-        setIceGatheringState(gatheringState);
-        console.log(`WebRTC Debug: ICE gathering state: ${gatheringState}`);
+        const state = peerConnection.iceGatheringState;
+        setIceGatheringState(state);
+        console.log(`🧊 [DIAG] ICE gathering state: ${state}`);
       };
 
+      // Handle incoming media tracks
       peerConnection.ontrack = (event) => {
-        console.log('Received remote track:', event.track.kind);
-        if (videoRef.current) {
-          if (videoRef.current.srcObject) {
-            videoRef.current.srcObject.addTrack(event.track);
-          } else {
-            videoRef.current.srcObject = event.streams[0];
+        console.log('📺 [DIAG] Received media track:', event.track.kind);
+        if (event.track.kind === 'video' && videoRef.current) {
+          console.log('✅ [DIAG] Setting video srcObject');
+          videoRef.current.srcObject = event.streams[0];
+          if (window.debugLogUserAction) {
+            window.debugLogUserAction('Auto-reconnect Video', 'Video track received and set');
           }
         }
       };
 
+      // Handle ICE candidates
       peerConnection.onicecandidate = (event) => {
-        if (event.candidate && websocket.readyState === WebSocket.OPEN) {
-          const candidateStr = event.candidate.candidate;
-          if (candidateStr.includes('.local')) {
-            console.log('WebRTC Debug: Skipping mDNS candidate (not suitable for cross-device connection)');
-            return;
-          }
-          
-          console.log(`WebRTC Debug: Sending ICE candidate: ${candidateStr.split(' ')[4]}:${candidateStr.split(' ')[5]}`);
-          websocket.send(JSON.stringify({
+        if (event.candidate && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          console.log('🧊 [DIAG] Sending ICE candidate');
+          wsRef.current.send(JSON.stringify({
             type: 'ice-candidate',
             candidate: event.candidate
           }));
         }
       };
 
-      // Start WebRTC handshake immediately (WebSocket already connected)
-      console.log('WebRTC Debug: Creating SDP offer for auto-reconnection');
+      console.log('🔧 [DIAG] Creating SDP offer...');
+      // Create and set local description
       const offer = await peerConnection.createOffer({
         offerToReceiveVideo: true,
         offerToReceiveAudio: true
       });
       
       await peerConnection.setLocalDescription(offer);
-      console.log('WebRTC Debug: Created and set local SDP offer');
-      
-      websocket.send(JSON.stringify({
+      console.log('✅ [DIAG] Local description set');
+
+      // Send offer through existing WebSocket
+      console.log('📤 [DIAG] Sending SDP offer through existing WebSocket');
+      wsRef.current.send(JSON.stringify({
         type: 'offer',
         sdp: offer.sdp
       }));
-      console.log('WebRTC Debug: Sent SDP offer to server');
+      console.log('✅ [DIAG] SDP offer sent successfully');
+      
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Auto-reconnect SDP', 'SDP offer sent through existing WebSocket');
+      }
       
     } catch (err) {
-      console.error('Auto-reconnection failed:', err);
-      console.log(`WebRTC Debug: Auto-reconnection failed: ${err.message}`);
+      console.error('💥 [DIAG] Auto-reconnection failed:', err);
+      console.log(`💥 [DIAG] Auto-reconnection failed: ${err.message}`);
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Auto-reconnect Error', `Failed: ${err.message}`);
+      }
       setError('Auto-reconnection failed: ' + err.message);
       setStatusWithLog('failed');
       setIsConnecting(false);
@@ -481,30 +519,31 @@ export default function WebRTCStream() {
           console.log(`WebRTC Debug: Received: ${message.type}`);
           
           if (message.type === 'answer') {
-            console.log('WebRTC Debug: Processing SDP answer from server');
-            if (!pcRef.current) {
-              console.log('WebRTC Debug: Error: peerConnection is not available');
-              return;
-            }
-            const answer = new RTCSessionDescription({
-              type: 'answer',
-              sdp: message.sdp
-            });
-            await pcRef.current.setRemoteDescription(answer);
-            console.log('WebRTC Debug: Set remote description successfully');
+            console.log('📨 [DIAG] RECEIVED SDP ANSWER from server');
+            console.log(`📨 [DIAG] PeerConnection state: ${pcRef.current?.connectionState}`);
+            console.log(`📨 [DIAG] Answer SDP length: ${message.sdp?.length || 0} chars`);
             
-            // Обработка отложенных ICE candidates
-            if (pendingIceCandidates.current.length > 0) {
-              console.log(`WebRTC Debug: Processing ${pendingIceCandidates.current.length} pending ICE candidates`);
-              for (const candidate of pendingIceCandidates.current) {
-                try {
-                  await pcRef.current.addIceCandidate(candidate);
-                  console.log('WebRTC Debug: Added pending ICE candidate successfully');
-                } catch (err) {
-                  console.log(`WebRTC Debug: Failed to add pending ICE candidate: ${err.message}`);
-                }
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('SDP Answer Received', 
+                `PC state: ${pcRef.current?.connectionState}, SDP length: ${message.sdp?.length || 0}`);
+            }
+            
+            if (pcRef.current && message.sdp) {
+              console.log('📨 [DIAG] Setting remote description...');
+              await pcRef.current.setRemoteDescription(new RTCSessionDescription({
+                type: 'answer',
+                sdp: message.sdp
+              }));
+              console.log('✅ [DIAG] Remote description set successfully');
+              
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('SDP Answer Set', 'Remote description set successfully');
               }
-              pendingIceCandidates.current = []; // Очищаем очередь
+            } else {
+              console.log('❌ [DIAG] Cannot set remote description - missing PC or SDP');
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('SDP Answer Error', 'Missing PeerConnection or SDP data');
+              }
             }
                       } else if (message.type === 'ice-candidate') {
             console.log('WebRTC Debug: Processing ICE candidate from server');
@@ -559,34 +598,39 @@ export default function WebRTCStream() {
             setStatusWithLog('connected');
             setError(null);
           } else if (message.type === 'reconnection_ready') {
-            console.log(`WebRTC Debug: System ready for reconnection: ${message.message}`);
+            console.log('🔄 [DIAG] RECONNECTION_READY MESSAGE RECEIVED');
+            console.log(`🔄 [DIAG] Current WebRTC state check:`);
+            console.log(`  - status: ${status}`);
+            console.log(`  - isConnecting: ${isConnecting}`);
+            console.log(`  - pcRef.current: ${pcRef.current ? 'exists' : 'null'}`);
+            console.log(`  - pcRef.connectionState: ${pcRef.current?.connectionState}`);
+            console.log(`  - pcRef.iceConnectionState: ${pcRef.current?.iceConnectionState}`);
+            console.log(`  - videoRef.current: ${videoRef.current ? 'exists' : 'null'}`);
+            console.log(`  - videoRef.srcObject: ${videoRef.current?.srcObject ? 'exists' : 'null'}`);
+            console.log(`  - video tracks: ${videoRef.current?.srcObject?.getTracks().length || 0}`);
             
-            // Детальная диагностика состояния соединения
-            const pcExists = !!pcRef.current;
-            const connectionState = pcRef.current ? pcRef.current.connectionState : 'no-pc';
-            const iceState = pcRef.current ? pcRef.current.iceConnectionState : 'no-pc';
-            const currentStatus = status;
-            const videoPlaying = videoRef.current && videoRef.current.srcObject && !videoRef.current.paused;
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('Reconnection Ready Received', 
+                `Status: ${status}, PC: ${pcRef.current?.connectionState}, Tracks: ${videoRef.current?.srcObject?.getTracks().length || 0}`);
+            }
             
-            console.log(`🔍 RECONNECTION_READY CHECK:`);
-            console.log(`   - pcRef exists: ${pcExists}`);
-            console.log(`   - connectionState: ${connectionState}`);
-            console.log(`   - iceConnectionState: ${iceState}`);
-            console.log(`   - UI status: ${currentStatus}`);
-            console.log(`   - Video playing: ${videoPlaying}`);
-            
-            // Улучшенная проверка - проверяем несколько условий
+            // Check if WebRTC/Video is already working to prevent disruption
             const isWebRTCWorking = pcRef.current && 
               (pcRef.current.connectionState === 'connected' || 
                pcRef.current.iceConnectionState === 'connected') &&
               status === 'connected';
-               
+              
             const isVideoWorking = videoRef.current && 
               videoRef.current.srcObject && 
               videoRef.current.srcObject.getTracks().length > 0;
             
+            console.log(`🔄 [DIAG] DECISION LOGIC:`);
+            console.log(`  - isWebRTCWorking: ${isWebRTCWorking}`);
+            console.log(`  - isVideoWorking: ${isVideoWorking}`);
+            console.log(`  - shouldPreventReconnection: ${isWebRTCWorking || isVideoWorking}`);
+            
             if (isWebRTCWorking || isVideoWorking) {
-              console.log('🚫 WebRTC/Video already working - IGNORING reconnection_ready to prevent disruption');
+              console.log('🚫 [DIAG] WebRTC/Video already working - IGNORING reconnection_ready to prevent disruption');
               setServerStatus('WebRTC already connected - no reconnection needed');
               
               // Log prevented auto-reconnection
@@ -597,7 +641,8 @@ export default function WebRTCStream() {
               return;
             }
             
-            console.log('✅ WebRTC not working - proceeding with auto-reconnection');
+            console.log('✅ [DIAG] WebRTC not working - proceeding with auto-reconnection');
+            console.log('🚀 [DIAG] CALLING startAutoReconnectCountdown()');
             setServerStatus('iPhone reconnected - auto-reconnecting in 5 seconds');
             setStatusWithLog('ready_for_reconnect');
             setError(null);
@@ -630,34 +675,38 @@ export default function WebRTCStream() {
               }
             }
           } else if (message.type === 'window_changed') {
-            console.log(`WebRTC Debug: iPhone window changed: ${message.message}`);
+            console.log('🪟 [DIAG] WINDOW_CHANGED MESSAGE RECEIVED');
+            console.log(`🪟 [DIAG] Message: ${message.message}`);
+            console.log(`🪟 [DIAG] Current WebRTC state check:`);
+            console.log(`  - status: ${status}`);
+            console.log(`  - isConnecting: ${isConnecting}`);
+            console.log(`  - pcRef.current: ${pcRef.current ? 'exists' : 'null'}`);
+            console.log(`  - pcRef.connectionState: ${pcRef.current?.connectionState}`);
+            console.log(`  - videoRef.srcObject: ${videoRef.current?.srcObject ? 'exists' : 'null'}`);
+            console.log(`  - video tracks: ${videoRef.current?.srcObject?.getTracks().length || 0}`);
             
-            // Детальная диагностика состояния соединения
-            const pcExists = !!pcRef.current;
-            const connectionState = pcRef.current ? pcRef.current.connectionState : 'no-pc';
-            const iceState = pcRef.current ? pcRef.current.iceConnectionState : 'no-pc';
-            const currentStatus = status;
-            const videoPlaying = videoRef.current && videoRef.current.srcObject && !videoRef.current.paused;
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('Window Changed Received', 
+                `Message: ${message.message}, Status: ${status}, PC: ${pcRef.current?.connectionState}`);
+            }
             
-            console.log(`🔍 WINDOW_CHANGED CHECK:`);
-            console.log(`   - pcRef exists: ${pcExists}`);
-            console.log(`   - connectionState: ${connectionState}`);
-            console.log(`   - iceConnectionState: ${iceState}`);
-            console.log(`   - UI status: ${currentStatus}`);
-            console.log(`   - Video playing: ${videoPlaying}`);
-            
-            // Улучшенная проверка - проверяем несколько условий
+            // Check if WebRTC/Video is already working to prevent disruption
             const isWebRTCWorking = pcRef.current && 
               (pcRef.current.connectionState === 'connected' || 
                pcRef.current.iceConnectionState === 'connected') &&
               status === 'connected';
-               
+              
             const isVideoWorking = videoRef.current && 
               videoRef.current.srcObject && 
               videoRef.current.srcObject.getTracks().length > 0;
             
+            console.log(`🪟 [DIAG] DECISION LOGIC:`);
+            console.log(`  - isWebRTCWorking: ${isWebRTCWorking}`);
+            console.log(`  - isVideoWorking: ${isVideoWorking}`);
+            console.log(`  - shouldPreventReconnection: ${isWebRTCWorking || isVideoWorking}`);
+            
             if (isWebRTCWorking || isVideoWorking) {
-              console.log('🚫 WebRTC/Video already working - IGNORING window_changed to prevent disruption');
+              console.log('🚫 [DIAG] WebRTC/Video already working - IGNORING window_changed to prevent disruption');
               setServerStatus('WebRTC already connected - no window change reconnection needed');
               
               // Log prevented auto-reconnection
@@ -668,7 +717,8 @@ export default function WebRTCStream() {
               return;
             }
             
-            console.log('✅ WebRTC not working - proceeding with window change reconnection');
+            console.log('✅ [DIAG] WebRTC not working - proceeding with window change reconnection');
+            console.log('🚀 [DIAG] CALLING startAutoReconnectCountdown() from window_changed');
             setServerStatus('iPhone reconnected with new window - auto-reconnecting in 5 seconds');
             setStatusWithLog('ready_for_reconnect');
             setError(null);
