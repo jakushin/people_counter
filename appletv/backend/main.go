@@ -504,7 +504,7 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 	log.Printf("[DEBUG] WebRTC: Pre-capture diagnostics for window %s", windowID)
 	
 	// Проверяем что окно еще существует в airplay контейнере
-	checkCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
+	checkCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
 	checkOut, checkErr := checkCmd.Output()
 	if checkErr != nil {
 		log.Printf("[ERROR] Window %s no longer exists: %v", windowID, checkErr)
@@ -1535,10 +1535,21 @@ func findWindow() (string, int, int, error) {
 	}
 	
 	// Execute xwininfo in the airplay container where UxPlay creates windows
-	winInfoCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
-	winInfoOut, err := winInfoCmd.Output()
+	winInfoCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
+	winInfoOut, err := winInfoCmd.CombinedOutput()
 	if err != nil {
 		log.Printf("[ERROR] xwininfo failed in airplay container: %v", err)
+		log.Printf("[ERROR] xwininfo stderr output: %s", string(winInfoOut))
+		
+		// Try to check if container exists
+		checkCmd := exec.Command("docker", "ps", "--filter", "name=airplay", "--format", "{{.Names}}")
+		checkOut, checkErr := checkCmd.Output()
+		if checkErr != nil {
+			log.Printf("[ERROR] Failed to check airplay container: %v", checkErr)
+		} else {
+			log.Printf("[DEBUG] Available airplay containers: %s", string(checkOut))
+		}
+		
 		return "", 0, 0, err
 	}
 	
@@ -1768,7 +1779,7 @@ func getWindowInfo(windowId string) {
 	}
 	
 	// Получаем подробную информацию об окне в airplay контейнере
-	winCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowId, "-display", ":0")
+	winCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", windowId, "-display", ":0")
 	winOut, winErr := winCmd.Output()
 	if winErr != nil {
 		log.Printf("[DEBUG] Error getting window info for %s: %v", windowId, winErr)
@@ -1786,7 +1797,7 @@ func getWindowInfo(windowId string) {
 	}
 	
 	// Также проверяем имя окна в airplay контейнере
-	nameCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowId, "-name", "-display", ":0")
+	nameCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", windowId, "-name", "-display", ":0")
 	nameOut, nameErr := nameCmd.Output()
 	if nameErr == nil {
 		log.Printf("[DEBUG] Window %s name: %s", windowId, strings.TrimSpace(string(nameOut)))
@@ -2269,7 +2280,7 @@ func readUxPlayLogs() ([]string, error) {
 	
 	if err != nil {
 		// Если файл не найден, попробуем через docker exec
-		cmd := exec.Command("docker", "exec", "airplay-1", "cat", "/tmp/uxplay.log")
+		cmd := exec.Command("docker", "exec", "appletv-airplay-1", "cat", "/tmp/uxplay.log")
 		output, err = cmd.Output()
 		if err != nil {
 			return nil, fmt.Errorf("failed to read UxPlay logs from any location: %v", err)
@@ -2397,10 +2408,11 @@ func getUxPlayWindows() []WindowInfo {
 	}
 	
 	// Выполняем команду xwininfo в airplay контейнере где работает UxPlay
-	cmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
-	output, err := cmd.Output()
+	cmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("ERROR: Failed to run xwininfo: %v", err)
+		log.Printf("ERROR: xwininfo diagnostics stderr: %s", string(output))
 		return []WindowInfo{}
 	}
 	
@@ -2476,7 +2488,7 @@ func getUxPlayWindows() []WindowInfo {
 		log.Printf("No windows found! Attempting additional diagnostics...")
 		
 		// Пытаемся использовать wmctrl как альтернативу в airplay контейнере
-		cmd := exec.Command("docker", "exec", "airplay-1", "wmctrl", "-l")
+		cmd := exec.Command("docker", "exec", "appletv-airplay-1", "wmctrl", "-l")
 		if output, err := cmd.Output(); err == nil {
 			log.Printf("wmctrl output: %s", string(output))
 		} else {
@@ -2484,7 +2496,7 @@ func getUxPlayWindows() []WindowInfo {
 		}
 		
 		// Проверяем процессы UxPlay в airplay контейнере
-		cmd = exec.Command("docker", "exec", "airplay-1", "ps", "aux")
+		cmd = exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
 		if output, err := cmd.Output(); err == nil {
 			outputStr := string(output)
 			if strings.Contains(outputStr, "uxplay") {
@@ -2847,12 +2859,12 @@ func ensureUxPlayRunning() {
 	log.Printf("[AUTO-RECONNECT] Checking if UxPlay is running...")
 	
 	// Check if UxPlay process exists in container
-	cmd := exec.Command("docker", "exec", "airplay-1", "pgrep", "uxplay")
+	cmd := exec.Command("docker", "exec", "appletv-airplay-1", "pgrep", "uxplay")
 	if err := cmd.Run(); err != nil {
 		log.Printf("[AUTO-RECONNECT] UxPlay not running, attempting restart...")
 		
 		// Restart UxPlay container
-		restartCmd := exec.Command("docker", "restart", "airplay-1")
+		restartCmd := exec.Command("docker", "restart", "appletv-airplay-1")
 		if err := restartCmd.Run(); err != nil {
 			log.Printf("[AUTO-RECONNECT] Failed to restart airplay container: %v", err)
 			return
@@ -2864,7 +2876,7 @@ func ensureUxPlayRunning() {
 		time.Sleep(5 * time.Second)
 		
 		// Verify UxPlay is now running
-		verifyCmd := exec.Command("docker", "exec", "airplay-1", "pgrep", "uxplay")
+		verifyCmd := exec.Command("docker", "exec", "appletv-airplay-1", "pgrep", "uxplay")
 		if err := verifyCmd.Run(); err != nil {
 			log.Printf("[AUTO-RECONNECT] UxPlay still not running after restart")
 		} else {
@@ -3286,7 +3298,7 @@ func startRTPListeners(session *WebRTCSession) error {
 
 // Get window dimensions for existing window
 func getWindowDimensions(windowID string) (int, int, error) {
-	cmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
+	cmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get window info: %v", err)
