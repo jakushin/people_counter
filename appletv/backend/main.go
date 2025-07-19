@@ -3586,7 +3586,6 @@ var (
 	uxplayMonitorMutex sync.Mutex
 	connectedClients = make(map[*websocket.Conn]bool)
 	clientsMutex sync.Mutex
-	static_diagnostic_counter = 0
 	static_monitor_cycle = 0
 )
 
