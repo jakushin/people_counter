@@ -59,6 +59,10 @@ var (
 	windowLostCount     int = 0   // Количество потерь окон
 	lastWindowFoundTime time.Time // Время последнего успешного обнаружения
 	static_diagnostic_counter int = 0 // Счетчик для детальной диагностики
+	
+	// Флаг активной WebRTC сессии для остановки мониторов
+	webrtcSessionActive bool = false
+	webrtcSessionMutex sync.RWMutex
 )
 
 // Debug logging system
@@ -526,6 +530,12 @@ func (s *WebRTCSession) Cleanup() {
 	log.Printf("[DEBUG] CLEANUP: Session components - FFmpeg=%v, VideoConn=%v, AudioConn=%v, PeerConn=%v, WebSocket=%v", 
 		s.FFmpegCmd != nil, s.VideoConn != nil, s.AudioConn != nil, s.PeerConn != nil, s.WebSocket != nil)
 	
+	// Сбрасываем флаг активной WebRTC сессии - перезапускаем мониторы
+	webrtcSessionMutex.Lock()
+	webrtcSessionActive = false
+	webrtcSessionMutex.Unlock()
+	log.Printf("[DEBUG] 🔄 WebRTC session deactivated - restarting window monitors")
+	
 	// 1. Отменить context для всех goroutines
 	if s.CancelFunc != nil {
 		s.CancelFunc()
@@ -565,6 +575,11 @@ func (s *WebRTCSession) Cleanup() {
 	}
 	
 	log.Printf("[SUCCESS] *** CLEANUP COMPLETED *** Session %s cleanup finished", s.ID)
+	
+	// Перезапускаем мониторы после очистки WebRTC сессии
+	log.Printf("[DEBUG] 🚀 Restarting window monitors after WebRTC cleanup")
+	go startWindowMonitor()
+	go startUxPlayMonitor()
 }
 
 // Частичная очистка для auto-reconnection (сохраняет WebSocket)
@@ -885,9 +900,19 @@ func testX11Connection() {
 func startWindowMonitor() {
 	go func() {
 		for {
-				// Enhanced monitoring with window ID tracking
-	windowCount, windowID := getWindowCountAndID()
-	log.Printf("[window-monitor] Total windows found: %d (ID: %s, Last: %s)", windowCount, windowID, lastWindowID)
+			// Проверяем активна ли WebRTC сессия
+			webrtcSessionMutex.RLock()
+			sessionActive := webrtcSessionActive
+			webrtcSessionMutex.RUnlock()
+			
+			if sessionActive {
+				log.Printf("[window-monitor] 🛑 WebRTC session active - stopping window monitor to save resources")
+				return
+			}
+			
+			// Enhanced monitoring with window ID tracking
+			windowCount, windowID := getWindowCountAndID()
+			log.Printf("[window-monitor] Total windows found: %d (ID: %s, Last: %s)", windowCount, windowID, lastWindowID)
 			
 			// Используем количество окон как индикатор наличия UxPlay
 			hasWindow := windowCount > 0
@@ -3467,6 +3492,12 @@ func initializeWebRTCSession(peerConnection *webrtc.PeerConnection, windowID str
 	
 	log.Printf("[INFO] WebRTC: Session initialized, waiting for ICE connection before starting packet forwarding")
 	
+	// Устанавливаем флаг активной WebRTC сессии - останавливаем мониторы
+	webrtcSessionMutex.Lock()
+	webrtcSessionActive = true
+	webrtcSessionMutex.Unlock()
+	log.Printf("[SUCCESS] 🎯 WebRTC session active - window monitors STOPPED to save resources!")
+	
 	// Start video packet forwarding goroutine - WAIT for ICE connection!
 	go func() {
 		log.Printf("[DEBUG] WebRTC: Video packet forwarding goroutine started, waiting for ICE connection...")
@@ -3976,6 +4007,16 @@ func startUxPlayMonitor() {
 	
 	for {
 		time.Sleep(3 * time.Second) // Проверяем каждые 3 секунды
+		
+		// Проверяем активна ли WebRTC сессия
+		webrtcSessionMutex.RLock()
+		sessionActive := webrtcSessionActive
+		webrtcSessionMutex.RUnlock()
+		
+		if sessionActive {
+			log.Printf("[UXPLAY_MONITOR] 🛑 WebRTC session active - stopping UxPlay monitor to save resources")
+			return
+		}
 		
 		// Логируем что монитор работает каждые 20 циклов (1 минута)
 		static_monitor_cycle++
