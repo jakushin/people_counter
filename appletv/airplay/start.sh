@@ -192,16 +192,27 @@ else
     exit 1
   fi
   
-  # В headless режиме используем более стабильный видео sink
-  # ИСПРАВЛЕНИЕ: пробуем xvimagesink (более стабилен), затем ximagesink с параметрами
-  if gst-inspect-1.0 xvimagesink > /dev/null 2>&1; then
-    log_with_timestamp "Using xvimagesink for headless mode (Xvfb compatible) - more stable"
-    VIDEO_SINK="xvimagesink"
+  # В headless режиме (Xvfb) используем совместимые видео sink'ы
+  # ПРИОРИТЕТ: glimagesink для OpenGL ускорения, затем другие совместимые sink'ы
+  if gst-inspect-1.0 glimagesink > /dev/null 2>&1; then
+    log_with_timestamp "Using glimagesink for headless mode (OpenGL accelerated) - best performance"
+    VIDEO_SINK="glimagesink"
+    # Настройка Mesa для software OpenGL в headless режиме
+    export MESA_GL_VERSION_OVERRIDE=3.3
+    export MESA_GLSL_VERSION_OVERRIDE=330
+    export LIBGL_ALWAYS_SOFTWARE=1
+    export GALLIUM_DRIVER=llvmpipe
   elif gst-inspect-1.0 ximagesink > /dev/null 2>&1; then
     log_with_timestamp "Using ximagesink for headless mode (Xvfb compatible) with forced window creation"
     VIDEO_SINK="ximagesink sync=false"
+  elif gst-inspect-1.0 autovideosink > /dev/null 2>&1; then
+    log_with_timestamp "Using autovideosink for headless mode (auto-detection)"
+    VIDEO_SINK="autovideosink"
+  elif gst-inspect-1.0 fakesink > /dev/null 2>&1; then
+    log_with_timestamp "Using fakesink for headless mode (null sink for testing)"
+    VIDEO_SINK="fakesink"
   else
-    log_with_timestamp "ERROR: Neither xvimagesink nor ximagesink available!"
+    log_with_timestamp "ERROR: No compatible video sink available!"
     exit 1
   fi
   
@@ -322,10 +333,22 @@ else
     kill $UXPLAY_PID 2>/dev/null || true
     sleep 2
     
-    # Пробуем аварийный перезапуск с fallback sink
-    FALLBACK_SINK="fakesink"
-    if gst-inspect-1.0 autovideosink > /dev/null 2>&1; then
+    # Пробуем аварийный перезапуск с fallback sink в порядке совместимости
+    if gst-inspect-1.0 glimagesink > /dev/null 2>&1; then
+      FALLBACK_SINK="glimagesink"
+      # Настройка Mesa для OpenGL
+      export MESA_GL_VERSION_OVERRIDE=3.3
+      export MESA_GLSL_VERSION_OVERRIDE=330
+      export LIBGL_ALWAYS_SOFTWARE=1
+      export GALLIUM_DRIVER=llvmpipe
+    elif gst-inspect-1.0 autovideosink > /dev/null 2>&1; then
       FALLBACK_SINK="autovideosink"
+    elif gst-inspect-1.0 ximagesink > /dev/null 2>&1; then
+      FALLBACK_SINK="ximagesink"
+    elif gst-inspect-1.0 fakesink > /dev/null 2>&1; then
+      FALLBACK_SINK="fakesink"
+    else
+      FALLBACK_SINK="fakesink"
     fi
     
     log_with_timestamp "Emergency restart with fallback sink: $FALLBACK_SINK"

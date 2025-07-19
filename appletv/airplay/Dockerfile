@@ -31,6 +31,14 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-alsa \
     gstreamer1.0-pulseaudio \
     gstreamer1.0-vaapi \
+    # Additional video sink plugins for headless mode
+    gstreamer1.0-opencv \
+    gstreamer1.0-gl \
+    # Mesa for software OpenGL in headless mode
+    mesa-utils \
+    libegl1-mesa \
+    libgl1-mesa-glx \
+    libglu1-mesa \
     # System dependencies
     avahi-daemon \
     mc \
