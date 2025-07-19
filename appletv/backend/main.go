@@ -1249,7 +1249,7 @@ func main() {
 				log.Printf("[CRITICAL] WebRTC: ICE connection closed after %.2f seconds", connectionDuration.Seconds())
 				debugInfo("WEBRTC", "ice_state_closed", "ICE connection closed", map[string]interface{}{
 					"sessionID": sessionID,
-					"iceState": state.String(),
+					"iceState": connectionState.String(),
 					"connectionDuration": connectionDuration.Seconds(),
 					"wasConnected": connectionDuration > time.Second, // Если соединение было больше секунды, значит работало
 				})
