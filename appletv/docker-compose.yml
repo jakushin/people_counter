@@ -1,0 +1,69 @@
+services:
+  airplay:
+    build: ./airplay
+    network_mode: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    devices:
+      - "/dev/fb0:/dev/fb0"
+      - "/dev/snd:/dev/snd"
+    privileged: true
+    volumes:
+      - "/var/run/dbus:/var/run/dbus"
+      - "airplay-records:/var/airplay-records"
+      - x11-socket:/tmp/.X11-unix:rw
+      - xauthority:/root/.Xauthority:rw
+      - "./logs:/var/log/appletv"
+    restart: unless-stopped
+    environment:
+      - DISPLAY=:0
+      - XAUTHORITY=/root/.Xauthority
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    depends_on: []
+  backend:
+    build: 
+      context: ./backend
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    network_mode: host
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    volumes:
+      - "airplay-records:/var/airplay-records"
+      - x11-socket:/tmp/.X11-unix:rw
+      - xauthority:/root/.Xauthority:rw
+      - "./logs:/var/log/appletv"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    restart: unless-stopped
+    environment:
+      - DISPLAY=:0
+      - XAUTHORITY=/root/.Xauthority
+      - LOG_FILE=/var/log/appletv/backend.log
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    depends_on:
+      - airplay
+  frontend:
+    build: ./frontend
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - "./logs:/var/log/appletv"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+volumes:
+  airplay-records:
+  x11-socket:
+  xauthority: 

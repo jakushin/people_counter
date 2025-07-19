@@ -1,19 +1,21 @@
 # airplay_project_plan.md
 
 ## 🎯 Project Overview
+
 This project implements an AirPlay receiver application that emulates an Apple TV device. The system is designed to run on **Ubuntu Server 24.04**, deployed in a **VM within Proxmox 8.4**. The application allows an **iPhone 16 Pro (iOS 16)** to discover it over AirPlay, stream video/audio content to it, and exposes a **web interface** for:
 
-✅ Real-time display of the AirPlay stream in a browser.
-✅ Starting/stopping recording of the incoming stream into `.mp4` files.
-✅ Browsing, playing, and downloading recorded videos.
+✅ Real-time display of the AirPlay stream in a browser.  
+✅ Starting/stopping recording of the incoming stream into `.mp4` files.  
+✅ Browsing, playing, and downloading recorded videos.  
 
-All components will run as **separate Docker containers** orchestrated by Docker Compose.
+All components will run as **separate Docker containers** orchestrated by Docker Compose.  
 
 ---
 
 ## 🖥 System Architecture
 
 ### Components
+
 1. **AirPlay Receiver (UxPlay):**
    - Acts as a virtual Apple TV.
    - Discovers iPhones over mDNS (Bonjour) using **Avahi**.
@@ -22,7 +24,7 @@ All components will run as **separate Docker containers** orchestrated by Docker
 
 2. **Media Transcoder (FFmpeg):**
    - Captures the framebuffer video and loopback audio output from UxPlay.
-   - Streams video to the frontend in real-time using **MJPEG** or **HLS**.
+   - Streams video to the frontend in real-time using **MJPEG** (preferred for low latency in browsers, especially Chrome on macOS).
    - Records incoming streams into `.mp4` files on disk.
    - Reference: [FFmpeg Documentation](https://ffmpeg.org/documentation.html)
 
@@ -32,7 +34,7 @@ All components will run as **separate Docker containers** orchestrated by Docker
    - Manages FFmpeg processes.
 
 4. **Web Frontend (UI):**
-   - A React or Svelte single-page app.
+   - React single-page application (React is preferred for this project).
    - Displays the live stream.
    - Provides controls for recording and browsing past recordings.
 
@@ -41,12 +43,12 @@ All components will run as **separate Docker containers** orchestrated by Docker
 ## 📡 API Specification
 
 ### `POST /api/record/start`
-- **Description:** Start recording the current AirPlay stream.
+
+- **Description:** Start recording the current AirPlay stream.  
 - **Request Body (JSON):**
   ```json
   {
-    "filename": "airplay-20250715-204500.mp4",  // optional, auto-generate if not provided
-    "quality": "high"                           // optional: "high" (default), "medium", "low"
+    "filename": "airplay-20250715-204500.mp4" // optional, auto-generate if not provided
   }
   ```
 - **Response (JSON):**
@@ -62,7 +64,8 @@ All components will run as **separate Docker containers** orchestrated by Docker
   - 500 Internal Server Error: "Failed to start recording."
 
 ### `POST /api/record/stop`
-- **Description:** Stop the current recording.
+
+- **Description:** Stop the current recording.  
 - **Response (JSON):**
   ```json
   {
@@ -75,7 +78,8 @@ All components will run as **separate Docker containers** orchestrated by Docker
   - 400 Bad Request: "No active recording to stop."
 
 ### `GET /api/records`
-- **Description:** Get a list of recorded video files.
+
+- **Description:** Get a list of recorded video files.  
 - **Response (JSON):**
   ```json
   [
@@ -95,31 +99,31 @@ All components will run as **separate Docker containers** orchestrated by Docker
   ```
 
 ### Authentication
-- **Authentication is not required** for this project.
-- Both API and web UI are designed to be accessible without any login or authorization.
+
+- **Authentication is not required** for this project.  
+- Both API and web UI are designed to be accessible without any login or authorization.  
 
 ---
 
 ## 🎨 UI/UX Design
 
 ### Live Stream Page
-- Video player showing the AirPlay stream.
+- Video player showing the AirPlay stream.  
 - Record toggle button:
   - Label: "Start Recording" → "Stop Recording".
-  - Recording indicator (red dot) when active.
+  - Recording indicator (red dot) when active.  
 - Link to **Gallery** page.
 
 ### Gallery Page
 - List of recorded files:
-  - Filename, duration, size.
-  - Play button to watch inline.
+  - Filename, duration, size.  
+  - Play button to watch inline.  
   - Download button.
-
-*(Low-fidelity mockups to be added in `/ui-mockups/` directory.)*
 
 ---
 
 ## 🛡️ Error Handling & Edge Cases
+
 - If FFmpeg fails to start:
   - API returns 500 error with message "FFmpeg process failed."
   - Log the exact command and error output.
@@ -128,12 +132,13 @@ All components will run as **separate Docker containers** orchestrated by Docker
 - If multiple iPhones connect:
   - **Support only one AirPlay stream at a time.**
   - Return 409 Conflict if a second stream is attempted.
+- **No automatic cleanup of old files:** if storage is full, the system will return an error.
 
 ---
 
 ## 📜 Logging Requirements
-- Log all key operations in structured JSON format.
-  Example:
+
+- Log all key operations in structured JSON format. Example:
   ```json
   {
     "timestamp": "2025-07-15T20:45:00Z",
@@ -142,29 +147,29 @@ All components will run as **separate Docker containers** orchestrated by Docker
     "filename": "airplay-20250715-204500.mp4"
   }
   ```
-- Levels: info, warning, error, debug.
-- Log AirPlay connections/disconnections, API calls, and FFmpeg errors.
-
----
-
-## ✅ Testing Requirements
-- Unit tests for backend API handlers.
-- Mock FFmpeg process for API tests.
-- Frontend tests for UI state changes (record button, gallery list).
-- Integration tests to simulate an AirPlay connection.
-- Minimal test coverage: **80%** of backend code.
+- Levels: info, warning, error, debug.  
+- Log AirPlay connections/disconnections, API calls, and FFmpeg errors.  
+- All logs and UI must be in **English only**.
 
 ---
 
 ## ⚡ Scalability
-- **Support only one AirPlay stream at a time.**
+
+- **Support only one AirPlay stream at a time.**  
 - No multi-stream support is planned in the initial version.
 
 ---
 
 ## ⚙ Backend Language
-- **Preferred:** Go (due to simpler concurrency model, smaller binary size).
-- Rust can be considered if existing team expertise is stronger there.
+
+- **Preferred:** Go (using Gin framework).  
+
+---
+
+## 📜 API Documentation
+
+- No OpenAPI/Swagger spec is required.  
+- API documentation will be maintained in the project README.  
 
 ---
 
@@ -200,6 +205,7 @@ volumes:
 ---
 
 ## 📂 Deployment Script Example
+
 ```bash
 #!/bin/bash
 echo "Stopping and cleaning up Docker..."
@@ -219,5 +225,65 @@ docker-compose up -d
 
 ---
 
-This plan provides detailed guidance for developers and helps IDE tools like Cursor follow consistent practices.
+## 🛠 Simplifications & Decisions
 
+- **AirPlay Receiver (UxPlay):** launched as a standalone process inside the container; no custom wrapper needed.  
+- **AirPlay 2:** not supported; only basic mirroring (video/audio).  
+- **Media Transcoder (FFmpeg):** captures `/dev/fb0` for video and `snd_aloop` for audio; no direct integration with UxPlay. No auto-restart logic for FFmpeg; API returns an error if FFmpeg crashes.  
+- **Web Backend (API):** built with **Gin** framework in Go. Files stored locally in Docker volume; no external storage integration (e.g., S3).  
+- **Web Frontend (React):** live stream uses standard `<video>` tag with MJPEG. Simple responsive design for mobile devices.  
+- **Docker & Deployment:** only **x86_64** supported; no ARM builds. Hardcoded paths and ports for simplicity.  
+- **Logging:** logs written to stdout/stderr only (Docker best practice). No external logging systems or rotation.  
+- **Testing:** no automated tests; manual testing with iPhone.  
+- **Security:** no authentication/authorization; system is fully open in the local network.  
+- **Multi-stream Handling:** rejects additional connections with 409 Conflict; simple error shown in UI.  
+- **Future Extensions:** none planned; project is intended as a personal, lightweight solution.  
+
+---
+
+## 🧠 Cursor Development Guidelines (MCP Usage)
+
+This project is developed using **Cursor IDE**. When solving tasks, generating code, or planning architecture in this repository, **Cursor must apply the following model context protocols (MCPs):**
+
+### ✅ Sequential Thinking MCP
+- **When to use:**  
+  - For any task that involves complex reasoning, multi-step planning, or architectural decisions.  
+  - For features that span across multiple components or require advanced analysis.  
+- **Instruction for Cursor:**  
+  - Always use the `sequential-thinking` MCP server to break down tasks into small, manageable sub-tasks.  
+  - This ensures modular code generation and avoids large, hard-to-debug files.  
+- **MCP Server Configuration:**  
+  ```json
+  {
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+  }
+  ```
+
+---
+
+### 📚 Context7 MCP
+- **When to use:**  
+  - When integrating with external APIs, tools, or libraries (e.g., UxPlay, FFmpeg, Avahi, Docker, React).  
+  - When looking up the latest documentation or code examples.  
+- **Instruction for Cursor:**  
+  - Use `context7` to fetch and study relevant documentation before writing code.  
+- **MCP Server Configuration:**  
+  ```json
+  {
+    "command": "npx",
+    "args": ["-y", "@upstash/context7-mcp"]
+  }
+  ```
+
+---
+
+### 📝 Development Rules for Cursor
+
+- Always follow the architecture and design in **`airplay_project_plan.md`**.  
+- Break down **every task into small sub-tasks** to ensure modular, testable code.  
+- Avoid generating large files; prefer small, focused modules.  
+- The backend is written in **Go**, frontend in **React**, and all API, logs, and UI text are **English-only**.  
+- The system does not require authentication or security measures, as it is intended for private LAN usage.  
+
+---
