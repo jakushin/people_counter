@@ -398,9 +398,22 @@ func waitForUxPlayWindowSimple(timeout time.Duration) (*AirPlayWindow, error) {
 		
 		// ИСПРАВЛЕНО: Используем findWindow() вместо getUxPlayWindows()
 		windowID, width, height, err := findWindow()
-		if err == nil && windowID != "" && width >= 100 && height >= 100 {
-			log.Printf("[SUCCESS] WebRTC: Found UxPlay window after %v - ID: %s, Size: %dx%d", 
-				time.Since(startTime), windowID, width, height)
+		// ИСПРАВЛЕНО: Более гибкая проверка размера + диагностика
+		if err == nil && windowID != "" {
+			log.Printf("[DEBUG] WebRTC: Found window %s size: %dx%d (accepting any size >= 1x1)", windowID, width, height)
+			
+			// ИСПРАВЛЕНИЕ: Принимаем даже маленькие окна 1x1 (начальный OpenGL context UxPlay)
+			if width >= 1 && height >= 1 {
+				if width < 50 || height < 50 {
+					log.Printf("[INFO] WebRTC: Small OpenGL window detected (%dx%d), likely initial UxPlay context - accepting anyway", width, height)
+				}
+				log.Printf("[SUCCESS] WebRTC: Found suitable UxPlay window after %v - ID: %s, Size: %dx%d", 
+					time.Since(startTime), windowID, width, height)
+			} else {
+				log.Printf("[ERROR] WebRTC: Invalid window %s (%dx%d) - this should not happen", windowID, width, height)
+				time.Sleep(1 * time.Second) 
+				continue
+			}
 			
 			// Notify client about success
 			if activeWebSocketConn != nil {
@@ -418,6 +431,8 @@ func waitForUxPlayWindowSimple(timeout time.Duration) (*AirPlayWindow, error) {
 				X:      0,
 				Y:      0,
 			}, nil
+		} else {
+			log.Printf("[DEBUG] WebRTC: No window found yet, err: %v", err)
 		}
 		
 		time.Sleep(1 * time.Second)
@@ -437,13 +452,28 @@ func waitForUxPlayWindow(conn *websocket.Conn, timeout time.Duration) (string, i
 	for time.Since(start) < timeout {
 		// Проверяем окно
 		windowID, width, height, err := findWindow()
-		if err == nil && windowID != "" && width >= 100 && height >= 100 {
-			log.Printf("[SUCCESS] WebRTC: Found UxPlay window after %.1fs - ID: %s, Size: %dx%d", 
-				time.Since(start).Seconds(), windowID, width, height)
+		// ИСПРАВЛЕНО: Более гибкая проверка размера для UxPlay OpenGL window
+		if err == nil && windowID != "" {
+			log.Printf("[DEBUG] WebRTC: Found window %s size: %dx%d (accepting any size >= 1x1)", windowID, width, height)
+			
+			// ИСПРАВЛЕНИЕ: Принимаем даже маленькие окна 1x1 (начальный OpenGL context UxPlay) 
+			if width >= 1 && height >= 1 {
+				if width < 50 || height < 50 {
+					log.Printf("[INFO] WebRTC: Small OpenGL window detected (%dx%d), likely initial UxPlay context - accepting anyway", width, height)
+				}
+				log.Printf("[SUCCESS] WebRTC: Found suitable UxPlay window after %.1fs - ID: %s, Size: %dx%d", 
+					time.Since(start).Seconds(), windowID, width, height)
+			} else {
+				log.Printf("[ERROR] WebRTC: Invalid window %s (%dx%d) - this should not happen", windowID, width, height)
+				time.Sleep(checkInterval)
+				continue
+			}
 			
 			// Уведомляем клиента об успехе
 			safeWriteWebSocket(conn, []byte(`{"type":"status","message":"AirPlay window found, starting WebRTC..."}`))
 			return windowID, width, height, nil
+		} else {
+			log.Printf("[DEBUG] WebRTC: No window found yet, err: %v", err)
 		}
 		
 		
@@ -643,6 +673,21 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 	
 	log.Printf("[INFO] WebRTC: Window %s current size: %dx%d (expected: %dx%d)", 
 		windowID, currentW, currentH, winW, winH)
+	
+	// ИСПРАВЛЕНИЕ: Специальная обработка маленьких окон (начальный OpenGL context)
+	if currentW < 50 || currentH < 50 {
+		log.Printf("[WARNING] WebRTC: Window %s is very small (%dx%d), this is likely initial OpenGL context", windowID, currentW, currentH)
+		log.Printf("[INFO] WebRTC: Attempting capture anyway - FFmpeg may generate black frames until video starts")
+		
+		// Используем минимальный размер для FFmpeg чтобы избежать ошибок
+		if currentW < 32 {
+			currentW = 32
+		}
+		if currentH < 32 {
+			currentH = 32
+		}
+		log.Printf("[INFO] WebRTC: Adjusted capture size to %dx%d for FFmpeg compatibility", currentW, currentH)
+	}
 	
 	// Используем текущие размеры
 	winW, winH = currentW, currentH
