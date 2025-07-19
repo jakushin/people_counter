@@ -2264,9 +2264,8 @@ func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength > 0 {
 		// Читаем тело запроса если есть
 		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil && requestBody.IncludeUIMessages {
-			// Сохраняем контент из UI
-			timestamp := time.Now().Format("2006-01-02_15-04-05")
-			filename = fmt.Sprintf("/var/log/appletv/debug_%s.txt", timestamp)
+			// Сохраняем контент из UI в debug.txt
+			filename = "/var/log/appletv/debug.txt"
 			
 			// Добавляем заголовок с временной меткой
 			content := fmt.Sprintf("=== DEBUG LOG SAVED AT %s ===\n\n%s", 
@@ -2281,7 +2280,7 @@ func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			
-			debugSuccess("DEBUG", "save_success", fmt.Sprintf("UI Debug log saved to %s", filename))
+			debugSuccess("DEBUG", "save_success", "UI Debug log saved to debug.txt")
 		} else {
 			// Используем стандартное сохранение backend логов
 			err := debugLogger.SaveToFile()

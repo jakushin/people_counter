@@ -244,19 +244,7 @@ else
   # Ждем дольше для запуска UxPlay и мониторим окна
   log_with_timestamp "Waiting for UxPlay to start and create window..."
   
-  # Запускаем мониторинг UxPlay логов в фоне
-  (
-    tail -f "$UXPLAY_LOG" 2>/dev/null | while read line; do
-      echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay] $line"
-      # Важные события UxPlay
-      case "$line" in
-        *"client connected"*|*"connection"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] iPhone connection: $line" ;;
-        *"video"*|*"stream"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] Video stream: $line" ;;
-        *"window"*|*"display"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] Window/display: $line" ;;
-      esac
-    done
-  ) &
-  TAIL_PID=$!
+  # UxPlay логи полностью изолированы в файл, мониторинг отключен
   
   for i in {1..20}; do
     if ps -p $UXPLAY_PID > /dev/null; then
@@ -268,11 +256,7 @@ else
       
       log_with_timestamp "Windows total: $WINDOW_COUNT, UxPlay windows: $UXPLAY_WINDOWS"
       
-      # Показываем последние UxPlay логи
-      if [ -f "$UXPLAY_LOG" ] && [ $(wc -l < "$UXPLAY_LOG") -gt 0 ]; then
-        LAST_UXPLAY_LOG=$(tail -1 "$UXPLAY_LOG" 2>/dev/null)
-        log_with_timestamp "Last UxPlay log: $LAST_UXPLAY_LOG"
-      fi
+      # UxPlay логи доступны только в файле $UXPLAY_LOG
       
       if [ $UXPLAY_WINDOWS -gt 0 ]; then
         log_with_timestamp "UxPlay window(s) detected!"
@@ -288,8 +272,7 @@ else
   
   if ps -p $UXPLAY_PID > /dev/null; then
     log_with_timestamp "UxPlay started successfully with PID $UXPLAY_PID"
-    log_with_timestamp "UxPlay initial logs:"
-    head -20 "$UXPLAY_LOG" 2>/dev/null || log_with_timestamp "No logs yet"
+    log_with_timestamp "UxPlay logs are available in $UXPLAY_LOG"
   else
     log_with_timestamp "UxPlay failed to start with $VIDEO_SINK, trying fallback..."
     
@@ -306,8 +289,7 @@ else
       log_with_timestamp "UxPlay fallback started successfully with PID $UXPLAY_PID"
     else
       log_with_timestamp "UxPlay fallback also failed!"
-      log_with_timestamp "UxPlay error logs:"
-      cat "$UXPLAY_LOG" 2>/dev/null || log_with_timestamp "No logs available"
+      log_with_timestamp "UxPlay error logs are available in $UXPLAY_LOG"
       log_with_timestamp "UxPlay help output:"
       cat /tmp/uxplay_help.log 2>/dev/null || log_with_timestamp "No help output"
       log_with_timestamp "X11 info:"
