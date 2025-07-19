@@ -590,6 +590,33 @@ export default function WebRTCStream() {
             setStatusWithLog('ready_for_reconnect');
             setError(null);
             startAutoReconnectCountdown();
+          } else if (message.type === 'uxplay_status') {
+            console.log(`🔔 UxPlay Status Update: ${message.status}`);
+            console.log(`   - Window ID: ${message.windowID || 'none'}`);
+            console.log(`   - Size: ${message.width}x${message.height}`);
+            
+            if (message.status === 'connected') {
+              console.log(`✅ iPhone connected to UxPlay - checking if WebRTC auto-restart needed`);
+              
+              // Проверяем нужно ли автоматически перезапустить WebRTC
+              const shouldAutoRestart = (status === 'stopped' || status === 'error') && !isConnecting;
+              console.log(`   - Current status: ${status}, isConnecting: ${isConnecting}`);
+              console.log(`   - Should auto-restart: ${shouldAutoRestart}`);
+              
+              if (shouldAutoRestart) {
+                console.log(`🚀 AUTO-RESTARTING WebRTC - iPhone reconnected to UxPlay`);
+                setStatusWithLog('auto_restarting');
+                setTimeout(() => {
+                  startWebRTC();
+                }, 1000); // Небольшая задержка для стабильности
+              }
+            } else if (message.status === 'disconnected') {
+              console.log(`❌ iPhone disconnected from UxPlay`);
+              if (isConnecting || status === 'connected') {
+                console.log(`🛑 Stopping WebRTC due to UxPlay disconnect`);
+                stopWebRTC();
+              }
+            }
           } else if (message.type === 'window_changed') {
             console.log(`WebRTC Debug: iPhone window changed: ${message.message}`);
             

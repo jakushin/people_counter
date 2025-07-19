@@ -1017,25 +1017,31 @@ func main() {
 		
 		// Умное ожидание UxPlay окна для переподключений
 
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			log.Printf("[ERROR] WebSocket upgrade failed: %v", err)
-			return
-		}
-		defer conn.Close()
-		
-		// Store WebSocket connection reference for auto-reconnection
-		activeWebSocketConn = conn
-		log.Printf("[DEBUG] *** WEBSOCKET STORED *** activeWebSocketConn set to new connection")
-		defer func() {
-			// Clear WebSocket reference when connection closes
-			log.Printf("[DEBUG] *** WEBSOCKET DEFER CLEANUP *** clearing activeWebSocketConn")
-			activeWebSocketConn = nil
-			// ИСПРАВЛЕНО: НЕ отключаем auto-reconnect при закрытии WebSocket
-			// Автоматическое переподключение должно работать независимо от WebSocket
-			log.Printf("[DEBUG] WebRTC: WebSocket closed, but auto-reconnect remains enabled")
-			debugInfo("WEBSOCKET", "connection_closed", "WebSocket closed, but auto-reconnect remains enabled")
-		}()
+			conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("[ERROR] WebSocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+	
+	// Регистрируем WebSocket клиента для UxPlay уведомлений
+	registerWebSocketClient(conn)
+	defer func() {
+		unregisterWebSocketClient(conn)
+	}()
+	
+	// Store WebSocket connection reference for auto-reconnection
+	activeWebSocketConn = conn
+	log.Printf("[DEBUG] *** WEBSOCKET STORED *** activeWebSocketConn set to new connection")
+	defer func() {
+		// Clear WebSocket reference when connection closes
+		log.Printf("[DEBUG] *** WEBSOCKET DEFER CLEANUP *** clearing activeWebSocketConn")
+		activeWebSocketConn = nil
+		// ИСПРАВЛЕНО: НЕ отключаем auto-reconnect при закрытии WebSocket
+		// Автоматическое переподключение должно работать независимо от WebSocket
+		log.Printf("[DEBUG] WebRTC: WebSocket closed, but auto-reconnect remains enabled")
+		debugInfo("WEBSOCKET", "connection_closed", "WebSocket closed, but auto-reconnect remains enabled")
+	}()
 		
 		log.Printf("[INFO] WebSocket connection established")
 		debugSuccess("WEBSOCKET", "connection_established", "WebSocket connection established for WebRTC signaling", map[string]interface{}{
@@ -1504,6 +1510,9 @@ func main() {
 	cleanupWebRTCSession()
 	})))
 
+	// Запускаем UxPlay монитор в отдельной горутине  
+	go startUxPlayMonitor()
+
 	r.Run(":8080")
 }
 
@@ -1525,48 +1534,7 @@ func getWindowCount() int {
 
 // Глобальная функция для поиска window_id и размера окна с расширенной диагностикой
 func findWindow() (string, int, int, error) {
-	// ВРЕМЕННАЯ ДИАГНОСТИКА для отладки проблемы поиска UxPlay окон
-	log.Printf("[WINDOW_DIAG] === ДЕТАЛЬНАЯ ДИАГНОСТИКА ПОИСКА UXPLAY ОКОН ===")
-	
-	// 1. Проверим что контейнер существует и запущен
-	checkContainerCmd := exec.Command("docker", "ps", "--filter", "name=airplay", "--format", "table {{.Names}}\t{{.Status}}")
-	checkOutput, err := checkContainerCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("[WINDOW_DIAG] ERROR checking containers: %v", err)
-		log.Printf("[WINDOW_DIAG] ERROR output: %s", string(checkOutput))
-	} else {
-		log.Printf("[WINDOW_DIAG] Available airplay containers:")
-		log.Printf("[WINDOW_DIAG] %s", string(checkOutput))
-	}
-	
-	// 2. Проверим процессы UxPlay в контейнере
-	psCmd := exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
-	psOutput, err := psCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("[WINDOW_DIAG] ERROR checking processes in appletv-airplay-1: %v", err)
-		log.Printf("[WINDOW_DIAG] Process check stderr: %s", string(psOutput))
-		
-		// Попробуем альтернативные имена контейнеров
-		alternativeNames := []string{"airplay-1", "appletv_airplay_1", "appletv-airplay_1"}
-		for _, name := range alternativeNames {
-			altCmd := exec.Command("docker", "exec", name, "ps", "aux")
-			altOutput, altErr := altCmd.CombinedOutput()
-			if altErr == nil {
-				log.Printf("[WINDOW_DIAG] SUCCESS with alternative container name '%s'!", name)
-				log.Printf("[WINDOW_DIAG] Processes in %s: %s", name, string(altOutput))
-				break
-			}
-		}
-	} else {
-		log.Printf("[WINDOW_DIAG] Processes in appletv-airplay-1:")
-		// Показываем только процессы uxplay для краткости
-		lines := strings.Split(string(psOutput), "\n")
-		for _, line := range lines {
-			if strings.Contains(strings.ToLower(line), "uxplay") || strings.Contains(line, "USER") {
-				log.Printf("[WINDOW_DIAG] %s", line)
-			}
-		}
-	}
+	// Поиск UxPlay окна (используется UxPlay монитором)
 	
 	// Проверяем X11 соединение
 	displayCmd := exec.Command("xset", "q")
@@ -1594,21 +1562,6 @@ func findWindow() (string, int, int, error) {
 		}
 		
 		return "", 0, 0, err
-	} else {
-		log.Printf("[WINDOW_DIAG] SUCCESS: xwininfo executed successfully in appletv-airplay-1")
-		log.Printf("[WINDOW_DIAG] xwininfo output length: %d bytes", len(winInfoOut))
-		
-		// Показываем первые несколько строк для диагностики
-		lines := strings.Split(string(winInfoOut), "\n")
-		log.Printf("[WINDOW_DIAG] First 10 lines of xwininfo output:")
-		for i, line := range lines {
-			if i >= 10 {
-				break
-			}
-			if line != "" {
-				log.Printf("[WINDOW_DIAG] Line %d: %s", i+1, line)
-			}
-		}
 	}
 	
 	// Подсчитываем общее количество окон для диагностики
@@ -1822,66 +1775,7 @@ func findWindow() (string, int, int, error) {
 		}
 	}
 	
-	// ДЕТАЛЬНАЯ ДИАГНОСТИКА: покажем все найденные окна и почему они не подходят
-	log.Printf("[WINDOW_DIAG] === ДЕТАЛЬНЫЙ АНАЛИЗ НАЙДЕННЫХ ОКОН ===")
-	log.Printf("[WINDOW_DIAG] Общее количество окон найдено: %d", windowCount)
-	log.Printf("[WINDOW_DIAG] Потенциальные видео окна: %d", len(potentialVideoWindows))
-	
-	// Показываем все окна с ID размером больше 100x100
-	log.Printf("[WINDOW_DIAG] Анализ всех окон из xwininfo output:")
-	allWindows = strings.Split(string(winInfoOut), "\n")
-	for i, line := range allWindows {
-		if strings.Contains(line, "0x") && strings.Contains(line, "x") {
-			log.Printf("[WINDOW_DIAG] Window %d: %s", i+1, line)
-			
-			// Парсим ID и размеры для детального анализа
-			fields := strings.Fields(line)
-			if len(fields) >= 2 {
-				id := fields[0]
-				var w, h int
-				for _, f := range fields {
-					if strings.Contains(f, "x") && strings.Contains(f, "+") {
-						size := strings.Split(f, "x")
-						if len(size) > 1 {
-							w, _ = strconv.Atoi(size[0])
-							rest := strings.Split(size[1], "+")
-							if len(rest) > 0 {
-								h, _ = strconv.Atoi(rest[0])
-							}
-						}
-					}
-				}
-				
-				if w > 0 && h > 0 {
-					log.Printf("[WINDOW_DIAG]   → ID: %s, Size: %dx%d", id, w, h)
-					
-					// Проверим имя окна
-					nameCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", id, "-name", "-display", ":0")
-					nameOut, nameErr := nameCmd.CombinedOutput()
-					if nameErr == nil {
-						nameLines := strings.Split(string(nameOut), "\n")
-						for _, nameLine := range nameLines {
-							if strings.Contains(nameLine, "Window name:") {
-								log.Printf("[WINDOW_DIAG]   → Name: %s", nameLine)
-								break
-							}
-						}
-					}
-					
-					// Анализируем почему окно не прошло фильтры
-					isVideoSize := w >= 640 && h >= 480
-					log.Printf("[WINDOW_DIAG]   → Video size check (>=640x480): %v", isVideoSize)
-					
-					// Проверяем названия
-					lowerLine := strings.ToLower(line)
-					isUxPlayName := strings.Contains(lowerLine, "uxplay") || 
-						strings.Contains(lowerLine, "airplay") || 
-						strings.Contains(lowerLine, "appletv")
-					log.Printf("[WINDOW_DIAG]   → UxPlay name check: %v", isUxPlayName)
-				}
-			}
-		}
-	}
+	// Окно не найдено - UxPlay монитор обработает это
 	
 	log.Printf("[ERROR] All priorities failed! No suitable UxPlay window found in %d total windows (potentialVideos: %d)", windowCount, len(potentialVideoWindows))
 	debugError("AIRPLAY", "window_not_found", "All priorities failed! No suitable UxPlay window found", map[string]interface{}{
@@ -3442,3 +3336,97 @@ func getWindowDimensions(windowID string) (int, int, error) {
 }
 
 // Wait for UxPlay window with client notifications
+
+// Глобальные переменные для мониторинга UxPlay
+var (
+	lastUxPlayWindowStatus = false
+	lastUxPlayWindowID = ""
+	uxplayMonitorMutex sync.Mutex
+	connectedClients = make(map[*websocket.Conn]bool)
+	clientsMutex sync.Mutex
+)
+
+// Функция для регистрации WebSocket клиентов
+func registerWebSocketClient(conn *websocket.Conn) {
+	clientsMutex.Lock()
+	connectedClients[conn] = true
+	clientsMutex.Unlock()
+	log.Printf("[UXPLAY_MONITOR] WebSocket client registered, total clients: %d", len(connectedClients))
+}
+
+// Функция для удаления WebSocket клиентов
+func unregisterWebSocketClient(conn *websocket.Conn) {
+	clientsMutex.Lock()
+	delete(connectedClients, conn)
+	clientsMutex.Unlock()
+	log.Printf("[UXPLAY_MONITOR] WebSocket client unregistered, total clients: %d", len(connectedClients))
+}
+
+// Функция для отправки уведомлений всем клиентам
+func broadcastUxPlayStatus(status string, windowID string, width, height int) {
+	clientsMutex.Lock()
+	defer clientsMutex.Unlock()
+	
+	message := fmt.Sprintf(`{"type":"uxplay_status","status":"%s","windowID":"%s","width":%d,"height":%d,"timestamp":"%s"}`, 
+		status, windowID, width, height, time.Now().Format(time.RFC3339))
+	
+	log.Printf("[UXPLAY_MONITOR] Broadcasting status '%s' to %d clients", status, len(connectedClients))
+	
+	var disconnectedClients []*websocket.Conn
+	
+	for conn := range connectedClients {
+		err := conn.WriteMessage(websocket.TextMessage, []byte(message))
+		if err != nil {
+			log.Printf("[UXPLAY_MONITOR] Failed to send message to client: %v", err)
+			disconnectedClients = append(disconnectedClients, conn)
+		}
+	}
+	
+	// Удаляем отключенных клиентов
+	for _, conn := range disconnectedClients {
+		delete(connectedClients, conn)
+	}
+}
+
+// Мониторинг UxPlay статуса в отдельной горутине
+func startUxPlayMonitor() {
+	log.Printf("[UXPLAY_MONITOR] Starting UxPlay status monitor...")
+	
+	for {
+		time.Sleep(3 * time.Second) // Проверяем каждые 3 секунды
+		
+		uxplayMonitorMutex.Lock()
+		
+		// Проверяем текущий статус UxPlay окна
+		windowID, width, height, err := findWindow()
+		currentWindowFound := (err == nil && windowID != "")
+		
+		// Проверяем изменился ли статус
+		statusChanged := (currentWindowFound != lastUxPlayWindowStatus) || 
+			(currentWindowFound && windowID != lastUxPlayWindowID)
+		
+		if statusChanged {
+			if currentWindowFound {
+				log.Printf("[UXPLAY_MONITOR] ✅ UxPlay window APPEARED: %s (%dx%d)", windowID, width, height)
+				debugSuccess("UXPLAY_MONITOR", "window_appeared", "UxPlay window detected - iPhone connected", map[string]interface{}{
+					"windowID": windowID,
+					"width": width,
+					"height": height,
+				})
+				broadcastUxPlayStatus("connected", windowID, width, height)
+			} else {
+				log.Printf("[UXPLAY_MONITOR] ❌ UxPlay window DISAPPEARED: %s", lastUxPlayWindowID)
+				debugWarning("UXPLAY_MONITOR", "window_disappeared", "UxPlay window lost - iPhone disconnected", map[string]interface{}{
+					"lastWindowID": lastUxPlayWindowID,
+				})
+				broadcastUxPlayStatus("disconnected", "", 0, 0)
+			}
+			
+			// Обновляем состояние
+			lastUxPlayWindowStatus = currentWindowFound
+			lastUxPlayWindowID = windowID
+		}
+		
+		uxplayMonitorMutex.Unlock()
+	}
+}
