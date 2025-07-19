@@ -20,7 +20,7 @@ export default function DebugPanel() {
   // Connect to debug WebSocket
   useEffect(() => {
     const connectDebugWebSocket = () => {
-      const wsUrl = `ws://${window.location.host}/api/debug/stream`;
+      const wsUrl = `ws://${window.location.hostname}:8080/api/debug/stream`;
       
       try {
         const ws = new WebSocket(wsUrl);
@@ -78,7 +78,7 @@ export default function DebugPanel() {
   const saveDebugLog = async () => {
     setIsSaving(true);
     try {
-      const response = await fetch('/api/debug/save', {
+      const response = await fetch(`http://${window.location.hostname}:8080/api/debug/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
