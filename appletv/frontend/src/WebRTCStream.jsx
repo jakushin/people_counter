@@ -9,7 +9,6 @@ export default function WebRTCStream() {
   const [iceConnectionState, setIceConnectionState] = useState('new');
   const [iceGatheringState, setIceGatheringState] = useState('new');
   const [isConnecting, setIsConnecting] = useState(false); // Новое состояние для контроля соединения
-  const [debugInfo, setDebugInfo] = useState([]); // Для хранения debug сообщений
   const [serverStatus, setServerStatus] = useState(null); // Статус с сервера
   const [autoReconnectCountdown, setAutoReconnectCountdown] = useState(null); // Обратный отсчет автопереподключения
 
@@ -18,12 +17,7 @@ export default function WebRTCStream() {
   const pendingIceCandidates = useRef([]); // Очередь для ICE candidates
   const autoReconnectTimeoutRef = useRef(null); // Таймер автопереподключения
 
-  // Функция добавления debug сообщений
-  const addDebugMessage = (message) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setDebugInfo(prev => [...prev.slice(-9), `${timestamp}: ${message}`]); // Оставляем только последние 10 сообщений
-    console.log(`WebRTC Debug: ${message}`);
-  };
+
 
   // Функция автопереподключения с обратным отсчетом
   const startAutoReconnectCountdown = () => {
@@ -40,7 +34,7 @@ export default function WebRTCStream() {
       
       if (secondsLeft <= 0) {
         setAutoReconnectCountdown(null);
-        addDebugMessage('Auto-reconnecting after countdown');
+        console.log('WebRTC Debug: Auto-reconnecting after countdown');
         // Use existing WebSocket for auto-reconnection instead of creating new one
         startWebRTCWithExistingSocket();
       } else {
@@ -58,7 +52,7 @@ export default function WebRTCStream() {
       autoReconnectTimeoutRef.current = null;
     }
     setAutoReconnectCountdown(null);
-    addDebugMessage('Auto-reconnect cancelled by user');
+    console.log('WebRTC Debug: Auto-reconnect cancelled by user');
   };
 
   // Функция auto-reconnection с существующим WebSocket 
@@ -67,12 +61,12 @@ export default function WebRTCStream() {
     
     // Check if we have an active WebSocket connection
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      addDebugMessage('No active WebSocket for auto-reconnection, creating new connection');
+      console.log('WebRTC Debug: No active WebSocket for auto-reconnection, creating new connection');
       startWebRTC();
       return;
     }
     
-    addDebugMessage('Starting WebRTC auto-reconnection with existing WebSocket connection');
+    console.log('WebRTC Debug: Starting WebRTC auto-reconnection with existing WebSocket connection');
     setIsConnecting(true);
     setStatus('connecting');
     setError(null);
@@ -83,7 +77,7 @@ export default function WebRTCStream() {
 
       // Clean up old PeerConnection before creating new one
       if (pcRef.current) {
-        addDebugMessage('Closing old PeerConnection for auto-reconnection');
+        console.log('WebRTC Debug: Closing old PeerConnection for auto-reconnection');
         pcRef.current.close();
         pcRef.current = null;
       }
@@ -124,20 +118,20 @@ export default function WebRTCStream() {
       peerConnection.oniceconnectionstatechange = () => {
         const iceState = peerConnection.iceConnectionState;
         setIceConnectionState(iceState);
-        addDebugMessage(`ICE connection state: ${iceState}`);
+        console.log(`WebRTC Debug: ICE connection state: ${iceState}`);
         
         if (iceState === 'failed') {
           setError('Network connection failed (ICE)');
-          addDebugMessage('ICE connection failed - network issues');
+          console.log('WebRTC Debug: ICE connection failed - network issues');
         } else if (iceState === 'connected') {
-          addDebugMessage('ICE connection established successfully');
+          console.log('WebRTC Debug: ICE connection established successfully');
         }
       };
       
       peerConnection.onicegatheringstatechange = () => {
         const gatheringState = peerConnection.iceGatheringState;
         setIceGatheringState(gatheringState);
-        addDebugMessage(`ICE gathering state: ${gatheringState}`);
+        console.log(`WebRTC Debug: ICE gathering state: ${gatheringState}`);
       };
 
       peerConnection.ontrack = (event) => {
@@ -155,11 +149,11 @@ export default function WebRTCStream() {
         if (event.candidate && websocket.readyState === WebSocket.OPEN) {
           const candidateStr = event.candidate.candidate;
           if (candidateStr.includes('.local')) {
-            addDebugMessage('Skipping mDNS candidate (not suitable for cross-device connection)');
+            console.log('WebRTC Debug: Skipping mDNS candidate (not suitable for cross-device connection)');
             return;
           }
           
-          addDebugMessage(`Sending ICE candidate: ${candidateStr.split(' ')[4]}:${candidateStr.split(' ')[5]}`);
+          console.log(`WebRTC Debug: Sending ICE candidate: ${candidateStr.split(' ')[4]}:${candidateStr.split(' ')[5]}`);
           websocket.send(JSON.stringify({
             type: 'ice-candidate',
             candidate: event.candidate
@@ -168,24 +162,24 @@ export default function WebRTCStream() {
       };
 
       // Start WebRTC handshake immediately (WebSocket already connected)
-      addDebugMessage('Creating SDP offer for auto-reconnection');
+      console.log('WebRTC Debug: Creating SDP offer for auto-reconnection');
       const offer = await peerConnection.createOffer({
         offerToReceiveVideo: true,
         offerToReceiveAudio: true
       });
       
       await peerConnection.setLocalDescription(offer);
-      addDebugMessage('Created and set local SDP offer');
+      console.log('WebRTC Debug: Created and set local SDP offer');
       
       websocket.send(JSON.stringify({
         type: 'offer',
         sdp: offer.sdp
       }));
-      addDebugMessage('Sent SDP offer to server');
+      console.log('WebRTC Debug: Sent SDP offer to server');
       
     } catch (err) {
       console.error('Auto-reconnection failed:', err);
-      addDebugMessage(`Auto-reconnection failed: ${err.message}`);
+      console.log(`WebRTC Debug: Auto-reconnection failed: ${err.message}`);
       setError('Auto-reconnection failed: ' + err.message);
       setStatus('failed');
       setIsConnecting(false);
@@ -243,13 +237,13 @@ export default function WebRTCStream() {
       peerConnection.oniceconnectionstatechange = () => {
         const iceState = peerConnection.iceConnectionState;
         setIceConnectionState(iceState);
-        addDebugMessage(`ICE connection state: ${iceState}`);
+        console.log(`WebRTC Debug: ICE connection state: ${iceState}`);
         
         if (iceState === 'failed') {
           setError('Network connection failed (ICE)');
-          addDebugMessage('ICE connection failed - network issues');
+          console.log('WebRTC Debug: ICE connection failed - network issues');
         } else if (iceState === 'connected') {
-          addDebugMessage('ICE connection established successfully');
+          console.log('WebRTC Debug: ICE connection established successfully');
         }
       };
       
@@ -257,7 +251,7 @@ export default function WebRTCStream() {
       peerConnection.onicegatheringstatechange = () => {
         const gatheringState = peerConnection.iceGatheringState;
         setIceGatheringState(gatheringState);
-        addDebugMessage(`ICE gathering state: ${gatheringState}`);
+        console.log(`WebRTC Debug: ICE gathering state: ${gatheringState}`);
       };
 
       // Обработка входящих медиа потоков
@@ -280,11 +274,11 @@ export default function WebRTCStream() {
           // Фильтруем mDNS candidates (.local адреса) которые не работают между устройствами
           const candidateStr = event.candidate.candidate;
           if (candidateStr.includes('.local')) {
-            addDebugMessage('Skipping mDNS candidate (not suitable for cross-device connection)');
+            console.log('WebRTC Debug: Skipping mDNS candidate (not suitable for cross-device connection)');
             return;
           }
           
-          addDebugMessage(`Sending ICE candidate: ${candidateStr.split(' ')[4]}:${candidateStr.split(' ')[5]}`);
+          console.log(`WebRTC Debug: Sending ICE candidate: ${candidateStr.split(' ')[4]}:${candidateStr.split(' ')[5]}`);
           websocket.send(JSON.stringify({
             type: 'ice-candidate',
             candidate: event.candidate
@@ -294,7 +288,7 @@ export default function WebRTCStream() {
 
       // WebSocket обработчики
       websocket.onopen = async () => {
-        addDebugMessage('WebSocket connected to server');
+        console.log('WebRTC Debug: WebSocket connected to server');
         
         // Создаем SDP offer
         try {
@@ -304,15 +298,15 @@ export default function WebRTCStream() {
           });
           
           await peerConnection.setLocalDescription(offer);
-          addDebugMessage('Created and set local SDP offer');
+          console.log('WebRTC Debug: Created and set local SDP offer');
           
           websocket.send(JSON.stringify({
             type: 'offer',
             sdp: offer.sdp
           }));
-          addDebugMessage('Sent SDP offer to server');
+          console.log('WebRTC Debug: Sent SDP offer to server');
         } catch (err) {
-          addDebugMessage(`Failed to create offer: ${err.message}`);
+          console.log(`WebRTC Debug: Failed to create offer: ${err.message}`);
           setError('Failed to create offer: ' + err.message);
           setStatus('failed');
           setIsConnecting(false);
@@ -322,12 +316,12 @@ export default function WebRTCStream() {
       websocket.onmessage = async (event) => {
         try {
           const message = JSON.parse(event.data);
-          addDebugMessage(`Received: ${message.type}`);
+          console.log(`WebRTC Debug: Received: ${message.type}`);
           
           if (message.type === 'answer') {
-            addDebugMessage('Processing SDP answer from server');
+            console.log('WebRTC Debug: Processing SDP answer from server');
             if (!pcRef.current) {
-              addDebugMessage('Error: peerConnection is not available');
+              console.log('WebRTC Debug: Error: peerConnection is not available');
               return;
             }
             const answer = new RTCSessionDescription({
@@ -335,29 +329,29 @@ export default function WebRTCStream() {
               sdp: message.sdp
             });
             await pcRef.current.setRemoteDescription(answer);
-            addDebugMessage('Set remote description successfully');
+            console.log('WebRTC Debug: Set remote description successfully');
             
             // Обработка отложенных ICE candidates
             if (pendingIceCandidates.current.length > 0) {
-              addDebugMessage(`Processing ${pendingIceCandidates.current.length} pending ICE candidates`);
+              console.log(`WebRTC Debug: Processing ${pendingIceCandidates.current.length} pending ICE candidates`);
               for (const candidate of pendingIceCandidates.current) {
                 try {
                   await pcRef.current.addIceCandidate(candidate);
-                  addDebugMessage('Added pending ICE candidate successfully');
+                  console.log('WebRTC Debug: Added pending ICE candidate successfully');
                 } catch (err) {
-                  addDebugMessage(`Failed to add pending ICE candidate: ${err.message}`);
+                  console.log(`WebRTC Debug: Failed to add pending ICE candidate: ${err.message}`);
                 }
               }
               pendingIceCandidates.current = []; // Очищаем очередь
             }
                       } else if (message.type === 'ice-candidate') {
-            addDebugMessage('Processing ICE candidate from server');
+            console.log('WebRTC Debug: Processing ICE candidate from server');
             if (!pcRef.current) {
-              addDebugMessage('Error: peerConnection is not available for ICE candidate');
+              console.log('WebRTC Debug: Error: peerConnection is not available for ICE candidate');
               return;
             }
             if (typeof pcRef.current.addIceCandidate !== 'function') {
-              addDebugMessage('Error: addIceCandidate is not a function');
+              console.log('WebRTC Debug: Error: addIceCandidate is not a function');
               return;
             }
             
@@ -365,7 +359,7 @@ export default function WebRTCStream() {
             
             // Если remote description еще не установлен, сохраняем candidate в очереди
             if (pcRef.current.remoteDescription === null) {
-              addDebugMessage('Remote description not set yet - adding ICE candidate to pending queue');
+              console.log('WebRTC Debug: Remote description not set yet - adding ICE candidate to pending queue');
               pendingIceCandidates.current.push(candidate);
               return;
             }
@@ -373,41 +367,41 @@ export default function WebRTCStream() {
             // Если remote description установлен, обрабатываем candidate сразу
             try {
               await pcRef.current.addIceCandidate(candidate);
-              addDebugMessage('Added ICE candidate successfully');
+              console.log('WebRTC Debug: Added ICE candidate successfully');
             } catch (err) {
-              addDebugMessage(`Failed to add ICE candidate: ${err.message}`);
+              console.log(`WebRTC Debug: Failed to add ICE candidate: ${err.message}`);
               // Не останавливаем соединение из-за проблем с отдельным candidate
             }
           } else if (message.type === 'status') {
-            addDebugMessage(`Server status: ${message.message}`);
+            console.log(`WebRTC Debug: Server status: ${message.message}`);
             setServerStatus(message.message); // Сохраняем статус для отображения
             setError(null); // Очищаем предыдущие ошибки
           } else if (message.type === 'error') {
-            addDebugMessage(`Server error: ${message.message}`);
+            console.log(`WebRTC Debug: Server error: ${message.message}`);
             setError('Server error: ' + message.message);
             setStatus('failed');
             setIsConnecting(false);
           } else if (message.type === 'airplay_disconnected') {
-            addDebugMessage(`iPhone disconnected: ${message.message}`);
+            console.log(`WebRTC Debug: iPhone disconnected: ${message.message}`);
             setServerStatus('iPhone disconnected - waiting for reconnection...');
             setStatus('disconnected');
             // Don't set isConnecting to false - we want to keep the WebSocket open for auto-reconnect
           } else if (message.type === 'airplay_reconnecting') {
-            addDebugMessage(`iPhone reconnecting: ${message.message}`);
+            console.log(`WebRTC Debug: iPhone reconnecting: ${message.message}`);
             setServerStatus('iPhone reconnected - starting WebRTC...');
             setStatus('connecting');
             setError(null);
           } else if (message.type === 'webrtc_ready') {
-            addDebugMessage(`WebRTC auto-reconnected: ${message.message}`);
+            console.log(`WebRTC Debug: WebRTC auto-reconnected: ${message.message}`);
             setServerStatus('WebRTC connected successfully');
             setStatus('connected');
             setError(null);
           } else if (message.type === 'reconnection_ready') {
-            addDebugMessage(`System ready for reconnection: ${message.message}`);
+            console.log(`WebRTC Debug: System ready for reconnection: ${message.message}`);
             
             // Check if WebRTC is already connected and working
             if (pcRef.current && pcRef.current.connectionState === 'connected') {
-              addDebugMessage('WebRTC already connected - ignoring reconnection_ready');
+              console.log('WebRTC Debug: WebRTC already connected - ignoring reconnection_ready');
               setServerStatus('WebRTC already connected - no reconnection needed');
               return;
             }
@@ -417,11 +411,11 @@ export default function WebRTCStream() {
             setError(null);
             startAutoReconnectCountdown();
           } else if (message.type === 'window_changed') {
-            addDebugMessage(`iPhone window changed: ${message.message}`);
+            console.log(`WebRTC Debug: iPhone window changed: ${message.message}`);
             
             // Check if WebRTC is already connected and working
             if (pcRef.current && pcRef.current.connectionState === 'connected') {
-              addDebugMessage('WebRTC already connected - ignoring window_changed');
+              console.log('WebRTC Debug: WebRTC already connected - ignoring window_changed');
               setServerStatus('WebRTC already connected - no window change reconnection needed');
               return;
             }
@@ -432,7 +426,7 @@ export default function WebRTCStream() {
             startAutoReconnectCountdown();
           }
         } catch (err) {
-          addDebugMessage(`Signaling error: ${err.message}`);
+          console.log(`WebRTC Debug: Signaling error: ${err.message}`);
           setError('Signaling error: ' + err.message);
         }
       };
@@ -446,17 +440,17 @@ export default function WebRTCStream() {
 
       websocket.onclose = () => {
         console.log('WebSocket closed');
-        addDebugMessage('WebSocket connection closed by server');
+        console.log('WebRTC Debug: WebSocket connection closed by server');
         
         if (status !== 'stopped') {
           setStatus('disconnected');
           setIsConnecting(false);
           
           // Автоматическое переподключение через 2 секунды
-          addDebugMessage('Attempting to reconnect WebSocket in 2 seconds...');
+          console.log('WebRTC Debug: Attempting to reconnect WebSocket in 2 seconds...');
           setTimeout(() => {
             if (status !== 'stopped') {
-              addDebugMessage('Auto-reconnecting WebSocket...');
+              console.log('WebRTC Debug: Auto-reconnecting WebSocket...');
               startWebRTC();
             }
           }, 2000);
@@ -473,7 +467,7 @@ export default function WebRTCStream() {
 
   // Функция остановки WebRTC соединения
   const stopWebRTC = () => {
-    addDebugMessage('Stopping WebRTC connection');
+    console.log('WebRTC Debug: Stopping WebRTC connection');
     
     // Отменяем автопереподключение если активно
     cancelAutoReconnect();
@@ -508,7 +502,7 @@ export default function WebRTCStream() {
       pcRef.current = null;
     }
     
-    addDebugMessage('WebRTC connection stopped');
+    console.log('WebRTC Debug: WebRTC connection stopped');
   };
 
   // Очистка при размонтировании
@@ -626,20 +620,6 @@ export default function WebRTCStream() {
       </div>
       
       {error && <div style={{color:'red', marginBottom: '16px', padding: '8px', backgroundColor: '#ffe6e6', border: '1px solid #ffcccc', borderRadius: '4px'}}>{error}</div>}
-      
-      {/* Debug информация */}
-      {debugInfo.length > 0 && (
-        <div style={{marginBottom: '16px', border: '1px solid #ddd', borderRadius: '4px', backgroundColor: '#f9f9f9'}}>
-          <div style={{padding: '8px', borderBottom: '1px solid #ddd', fontWeight: 'bold', fontSize: '14px'}}>
-            Debug Information:
-          </div>
-          <div style={{padding: '8px', fontSize: '12px', fontFamily: 'monospace', maxHeight: '200px', overflowY: 'auto'}}>
-            {debugInfo.map((info, index) => (
-              <div key={index} style={{marginBottom: '2px'}}>{info}</div>
-            ))}
-          </div>
-        </div>
-      )}
       
       {/* Debug Panel */}
       <DebugPanel />
