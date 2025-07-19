@@ -3361,6 +3361,7 @@ var (
 	connectedClients = make(map[*websocket.Conn]bool)
 	clientsMutex sync.Mutex
 	static_diagnostic_counter = 0
+	static_monitor_cycle = 0
 )
 
 // Функция для регистрации WebSocket клиентов
@@ -3413,10 +3414,9 @@ func startUxPlayMonitor() {
 		time.Sleep(3 * time.Second) // Проверяем каждые 3 секунды
 		
 		// Логируем что монитор работает каждые 20 циклов (1 минута)
-		static monitorCycle int
-		monitorCycle++
-		if monitorCycle%20 == 0 {
-			log.Printf("[UXPLAY_MONITOR] Monitor is running (cycle %d), connected clients: %d", monitorCycle, len(connectedClients))
+		static_monitor_cycle++
+		if static_monitor_cycle%20 == 0 {
+			log.Printf("[UXPLAY_MONITOR] Monitor is running (cycle %d), connected clients: %d", static_monitor_cycle, len(connectedClients))
 		}
 		
 		uxplayMonitorMutex.Lock()
@@ -3426,7 +3426,7 @@ func startUxPlayMonitor() {
 		currentWindowFound := (err == nil && windowID != "")
 		
 		// Логируем попытки поиска каждые 10 циклов (30 секунд)
-		if monitorCycle%10 == 0 {
+		if static_monitor_cycle%10 == 0 {
 			if currentWindowFound {
 				log.Printf("[UXPLAY_MONITOR] Window search SUCCESS: %s (%dx%d)", windowID, width, height)
 			} else {
