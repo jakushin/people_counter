@@ -52,6 +52,13 @@ var (
 	}
 	airPlayStateMutex sync.RWMutex
 	startTime time.Time
+	
+	// === ДИАГНОСТИКА ПОИСКА UXPLAY ОКОН ===
+	windowSearchAttempts int = 0  // Общее количество попыток поиска
+	windowFoundCount    int = 0   // Количество успешных обнаружений
+	windowLostCount     int = 0   // Количество потерь окон
+	lastWindowFoundTime time.Time // Время последнего успешного обнаружения
+	static_diagnostic_counter int = 0 // Счетчик для детальной диагностики
 )
 
 // Debug logging system
@@ -1779,12 +1786,25 @@ func findWindow() (string, int, int, error) {
 			getWindowInfo(id)
 			
 			if w > 100 && h > 100 { // Проверяем минимальный размер
+				// === ДИАГНОСТИКА УСПЕШНОГО ОБНАРУЖЕНИЯ ===
+				windowFoundCount++
+				lastWindowFoundTime = time.Now()
+				
 				debugSuccess("AIRPLAY", "window_found_priority1", "Found UxPlay/AirPlay window by name", map[string]interface{}{
 					"windowID": id,
 					"width": w,
 					"height": h,
 					"priority": "name_match",
+					"searchAttempts": windowSearchAttempts,
+					"foundCount": windowFoundCount,
+					"timeSinceLastFound": time.Since(lastWindowFoundTime).Seconds(),
 				})
+				
+				log.Printf("🎯 [WINDOW_SUCCESS] Found UxPlay window after %d search attempts (total found: %d)", windowSearchAttempts, windowFoundCount)
+				
+				// Сбрасываем диагностический счетчик при успешном обнаружении
+				static_diagnostic_counter = 0
+				
 				return id, w, h, nil
 			}
 		}
@@ -1899,8 +1919,17 @@ func findWindow() (string, int, int, error) {
 	// Окно не найдено - запускаем детальную диагностику
 	log.Printf("[ERROR] All priorities failed! No suitable UxPlay window found in %d total windows (potentialVideos: %d)", windowCount, len(potentialVideoWindows))
 	
-	// Запускаем диагностику при первой неудачной попытке найти окно
+	// === РАСШИРЕННАЯ ДИАГНОСТИКА ПОИСКА ОКОН ===
+	windowSearchAttempts++
 	static_diagnostic_counter++
+	
+	// Расчет статистики успешности
+	timeSinceLastSuccess := time.Since(lastWindowFoundTime)
+	successRate := float64(0)
+	if windowSearchAttempts > 0 {
+		successRate = float64(windowFoundCount) / float64(windowSearchAttempts) * 100
+	}
+	
 	if static_diagnostic_counter == 1 {
 		log.Printf("[UXPLAY_DIAG] Первая неудачная попытка - запускаем детальную диагностику UxPlay...")
 		go diagnoseUxPlayContainer() // Запускаем в горутине чтобы не блокировать
@@ -1909,10 +1938,17 @@ func findWindow() (string, int, int, error) {
 		go diagnoseUxPlayContainer()
 	}
 	
+	log.Printf("📊 [WINDOW_STATS] Search Attempts: %d, Found: %d, Success Rate: %.1f%%, Time Since Last Success: %.1fs", 
+		windowSearchAttempts, windowFoundCount, successRate, timeSinceLastSuccess.Seconds())
+	
 	debugError("AIRPLAY", "window_not_found", "All priorities failed! No suitable UxPlay window found", map[string]interface{}{
 		"totalWindows": windowCount,
 		"potentialVideoWindows": len(potentialVideoWindows),
 		"diagnosticAttempt": static_diagnostic_counter,
+		"searchAttempts": windowSearchAttempts,
+		"foundCount": windowFoundCount,
+		"successRate": successRate,
+		"timeSinceLastSuccess": timeSinceLastSuccess.Seconds(),
 	})
 	return "", 0, 0, nil
 }

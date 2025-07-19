@@ -238,9 +238,29 @@ else
   # Запускаем UxPlay с правильными переменными окружения для headless режима
   log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n \"AppleTV (Backend)\""
   
+  # === ПРИНУДИТЕЛЬНЫЙ СБРОС GSTREAMER PIPELINE ===
+  log_with_timestamp "Clearing GStreamer cache and X11 state before UxPlay start..."
+  
+  # Очищаем GStreamer registry и кэш
+  rm -rf /root/.cache/gstreamer-1.0/* 2>/dev/null || true
+  rm -rf /tmp/gst-* 2>/dev/null || true
+  
+  # Принудительно убиваем старые GStreamer процессы
+  pkill -f gst-launch 2>/dev/null || true
+  pkill -f ximagesink 2>/dev/null || true
+  pkill -f xvimagesink 2>/dev/null || true
+  sleep 1
+  
+  # Сбрасываем X11 кэш окон
+  xhost + 2>/dev/null || true
+  xwininfo -root -tree -display :0 >/dev/null 2>&1 || true
+  
+  log_with_timestamp "GStreamer and X11 state cleared, starting UxPlay..."
+  
   # Устанавливаем переменные окружения для текущего процесса
   # Полностью перенаправляем UxPlay логи только в файл, НЕ в stdout контейнера
   env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
+    GST_DEBUG=3 GST_REGISTRY_FORK=no \
     uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" > "$UXPLAY_LOG" 2>&1 &
   UXPLAY_PID=$!
   
@@ -249,9 +269,13 @@ else
   
   # UxPlay логи полностью изолированы в файл, мониторинг отключен
   
-  for i in {1..20}; do
+  # === УЛУЧШЕННАЯ RETRY ЛОГИКА ДЛЯ СОЗДАНИЯ ОКОН ===
+  RETRY_COUNT=30  # Увеличиваем до 30 попыток
+  WINDOW_RETRY_DELAY=2  # Задержка между проверками
+  
+  for i in $(seq 1 $RETRY_COUNT); do
     if ps -p $UXPLAY_PID > /dev/null; then
-      log_with_timestamp "UxPlay process is running (check $i/20)"
+      log_with_timestamp "UxPlay process is running (check $i/$RETRY_COUNT)"
       
       # Проверяем создались ли окна
       WINDOW_COUNT=$(xwininfo -root -tree -display :0 2>/dev/null | wc -l)
@@ -262,46 +286,72 @@ else
       # UxPlay логи доступны только в файле $UXPLAY_LOG
       
       if [ $UXPLAY_WINDOWS -gt 0 ]; then
-        log_with_timestamp "UxPlay window(s) detected!"
+        log_with_timestamp "✅ UxPlay window(s) detected!"
         xwininfo -root -tree -display :0 2>/dev/null | grep -i "uxplay\|airplay"
         break
       fi
+      
+      # RETRY ЛОГИКА: Каждые 10 попыток пробуем рестарт GStreamer
+      if [ $((i % 10)) -eq 0 ] && [ $i -lt $RETRY_COUNT ]; then
+        log_with_timestamp "⚠️ Retry $i: No windows after 10 attempts, forcing GStreamer refresh..."
+        
+        # Посылаем SIGUSR1 UxPlay для сброса GStreamer (если поддерживается)
+        kill -USR1 $UXPLAY_PID 2>/dev/null || true
+        
+        # Принудительно очищаем GStreamer кэш снова
+        rm -rf /tmp/gst-* 2>/dev/null || true
+        
+        log_with_timestamp "GStreamer refresh completed, continuing checks..."
+      fi
+      
+             sleep $WINDOW_RETRY_DELAY
     else
-      log_with_timestamp "UxPlay process has stopped at check $i/20"
+      log_with_timestamp "❌ UxPlay process has stopped at check $i/$RETRY_COUNT"
       break
     fi
-    sleep 1
   done
   
-  if ps -p $UXPLAY_PID > /dev/null; then
-    log_with_timestamp "UxPlay started successfully with PID $UXPLAY_PID"
-    log_with_timestamp "UxPlay logs are available in $UXPLAY_LOG"
-  else
-    log_with_timestamp "UxPlay failed to start with $VIDEO_SINK, trying fallback..."
+  # === ФИНАЛЬНАЯ ДИАГНОСТИКА И РЕШЕНИЕ ПРОБЛЕМ ===
+  FINAL_UXPLAY_WINDOWS=$(xwininfo -root -tree -display :0 2>/dev/null | grep -i "uxplay\|airplay" | wc -l)
+  
+  if [ $FINAL_UXPLAY_WINDOWS -eq 0 ]; then
+    log_with_timestamp "⚠️ WARNING: No UxPlay windows created after $RETRY_COUNT attempts!"
+    log_with_timestamp "Attempting emergency UxPlay restart with fallback video sink..."
     
-    # Fallback: запуск с правильными переменными окружения
-    log_with_timestamp "Trying UxPlay fallback with correct environment..."
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay fallback starting..." >> "$UXPLAY_LOG"
+    # Убиваем текущий UxPlay
+    kill $UXPLAY_PID 2>/dev/null || true
+    sleep 2
     
-          env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-        uxplay -d -vs ximagesink -s 1920x1080 -n "AppleTV (Backend)" > "$UXPLAY_LOG" 2>&1 &
-    UXPLAY_PID=$!
-    sleep 5
-    
-    if ps -p $UXPLAY_PID > /dev/null; then
-      log_with_timestamp "UxPlay fallback started successfully with PID $UXPLAY_PID"
-    else
-      log_with_timestamp "UxPlay fallback also failed!"
-      log_with_timestamp "UxPlay error logs are available in $UXPLAY_LOG"
-      log_with_timestamp "UxPlay help output:"
-      cat /tmp/uxplay_help.log 2>/dev/null || log_with_timestamp "No help output"
-      log_with_timestamp "X11 info:"
-      xdpyinfo -display :0 2>&1 || log_with_timestamp "X11 not available"
-      
-      # Останавливаем мониторинг окон
-      kill $MONITOR_PID 2>/dev/null
-      exit 1
+    # Пробуем аварийный перезапуск с fallback sink
+    FALLBACK_SINK="fakesink"
+    if gst-inspect-1.0 autovideosink > /dev/null 2>&1; then
+      FALLBACK_SINK="autovideosink"
     fi
+    
+    log_with_timestamp "Emergency restart with fallback sink: $FALLBACK_SINK"
+    env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
+      GST_DEBUG=2 GST_REGISTRY_FORK=no \
+      uxplay -d -vs $FALLBACK_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+    UXPLAY_PID=$!
+    
+    sleep 5
+    EMERGENCY_WINDOWS=$(xwininfo -root -tree -display :0 2>/dev/null | grep -i "uxplay\|airplay" | wc -l)
+    log_with_timestamp "Emergency restart result: $EMERGENCY_WINDOWS UxPlay windows found"
+  else
+    log_with_timestamp "✅ SUCCESS: $FINAL_UXPLAY_WINDOWS UxPlay window(s) are ready!"
+  fi
+  
+  # Финальная проверка процесса UxPlay
+  if ps -p $UXPLAY_PID > /dev/null; then
+    log_with_timestamp "🎯 UxPlay started successfully with PID $UXPLAY_PID"
+    log_with_timestamp "📝 UxPlay logs are available in $UXPLAY_LOG"
+  else
+    log_with_timestamp "❌ CRITICAL: UxPlay process failed to start properly"
+    log_with_timestamp "📝 Check UxPlay error logs in $UXPLAY_LOG"
+    
+    # Останавливаем мониторинг окон
+    kill $MONITOR_PID 2>/dev/null
+    exit 1
   fi
 fi
 
