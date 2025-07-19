@@ -323,7 +323,7 @@ export default function WebRTCStream() {
 
     try {
       // Создаем WebSocket соединение
-      const wsUrl = `ws://${window.location.host}/api/webrtc/signal`;
+      const wsUrl = `ws://${window.location.hostname}:8080/api/webrtc/signal`;
       console.log(`🔌 CREATING WEBSOCKET - URL: ${wsUrl}`);
       
       // Cleanup any existing WebSocket before creating new one
