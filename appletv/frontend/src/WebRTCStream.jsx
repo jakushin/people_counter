@@ -306,6 +306,18 @@ export default function WebRTCStream() {
       
       websocket.addEventListener('close', (event) => {
         console.log(`❌ WEBSOCKET CLOSED - code: ${event.code}, reason: ${event.reason}, readyState: ${websocket.readyState}`);
+        
+        // Принудительное переподключение WebSocket через 3 секунды если не в режиме stopped
+        if (status !== 'stopped') {
+          console.log(`🔄 WebSocket disconnected unexpectedly - scheduling reconnect in 3 seconds`);
+          setTimeout(() => {
+            if (status !== 'stopped' && (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN)) {
+              console.log(`🚀 FORCE WebSocket RECONNECT - attempting to reconnect`);
+              // Принудительно переподключаемся
+              startWebRTC();
+            }
+          }, 3000);
+        }
       });
       
       websocket.addEventListener('error', (event) => {

@@ -19,6 +19,7 @@ services:
     environment:
       - DISPLAY=:0
       - XAUTHORITY=/root/.Xauthority
+      - TZ=Europe/Belgrade
     logging:
       driver: "json-file"
       options:
@@ -44,6 +45,7 @@ services:
     environment:
       - DISPLAY=:0
       - XAUTHORITY=/root/.Xauthority
+      - TZ=Europe/Belgrade
       - LOG_FILE=/var/log/appletv/backend.log
     logging:
       driver: "json-file"
@@ -56,6 +58,8 @@ services:
     build: ./frontend
     network_mode: host
     restart: unless-stopped
+    environment:
+      - TZ=Europe/Belgrade
     volumes:
       - "./logs:/var/log/appletv"
     logging:

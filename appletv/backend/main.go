@@ -1060,6 +1060,7 @@ func main() {
 	// Регистрируем WebSocket клиента для UxPlay уведомлений
 	registerWebSocketClient(conn)
 	defer func() {
+		log.Printf("[UXPLAY_MONITOR] WebSocket connection closing, unregistering client")
 		unregisterWebSocketClient(conn)
 	}()
 	
