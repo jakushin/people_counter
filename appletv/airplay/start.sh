@@ -196,10 +196,10 @@ else
   # ИСПРАВЛЕНИЕ: пробуем xvimagesink (более стабилен), затем ximagesink с параметрами
   if gst-inspect-1.0 xvimagesink > /dev/null 2>&1; then
     log_with_timestamp "Using xvimagesink for headless mode (Xvfb compatible) - more stable"
-    VIDEO_SINK="xvimagesink force-aspect-ratio=false"
+    VIDEO_SINK="xvimagesink"
   elif gst-inspect-1.0 ximagesink > /dev/null 2>&1; then
     log_with_timestamp "Using ximagesink for headless mode (Xvfb compatible) with forced window creation"
-    VIDEO_SINK="ximagesink force-aspect-ratio=false sync=false"
+    VIDEO_SINK="ximagesink sync=false"
   else
     log_with_timestamp "ERROR: Neither xvimagesink nor ximagesink available!"
     exit 1
