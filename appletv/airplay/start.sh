@@ -202,6 +202,20 @@ else
     exit 1
   fi
   
+  # Проверяем видео декодеры для UxPlay
+  if ! gst-inspect-1.0 avdec_h264 > /dev/null 2>&1; then
+    log_with_timestamp "WARNING: GStreamer avdec_h264 plugin NOT available - using software decoding"
+  else
+    log_with_timestamp "SUCCESS: GStreamer avdec_h264 plugin available for hardware decoding"
+  fi
+  
+  # Проверяем аудио плагины
+  if ! gst-inspect-1.0 pulsesink > /dev/null 2>&1; then
+    log_with_timestamp "WARNING: GStreamer pulsesink plugin NOT available - using default audio"
+  else
+    log_with_timestamp "SUCCESS: GStreamer pulsesink plugin available"
+  fi
+  
   log_with_timestamp "Selected video sink: $VIDEO_SINK"
   
   # Проверяем доступность UxPlay
@@ -216,14 +230,14 @@ else
   
   # Добавляем временную метку в начало логов UxPlay
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay starting with DISPLAY=$DISPLAY and VIDEO_SINK=$VIDEO_SINK..." > "$UXPLAY_LOG"
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay parameters: -d (debug) -vs $VIDEO_SINK -s 1920x1080 -n AppleTV" >> "$UXPLAY_LOG"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay parameters: -d (debug) -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n AppleTV" >> "$UXPLAY_LOG"
   
   # Запускаем UxPlay с правильными переменными окружения для headless режима
-  log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n \"AppleTV (Backend)\""
+  log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n \"AppleTV (Backend)\""
   
   # Устанавливаем переменные окружения для текущего процесса
   env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
   UXPLAY_PID=$!
   
   # Ждем дольше для запуска UxPlay и мониторим окна
@@ -282,8 +296,8 @@ else
     log_with_timestamp "Trying UxPlay fallback with correct environment..."
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay fallback starting..." >> "$UXPLAY_LOG"
     
-    env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-      uxplay -d -vs ximagesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+          env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
+        uxplay -d -vs ximagesink -s 1920x1080 -avdec -ao pulsesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
     UXPLAY_PID=$!
     sleep 5
     

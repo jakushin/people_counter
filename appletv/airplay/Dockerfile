@@ -21,6 +21,10 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-x \
     gstreamer1.0-alsa \
     gstreamer1.0-pulseaudio \
+    gstreamer1.0-vaapi \
+    libavcodec-dev \
+    libavutil-dev \
+    libavformat-dev \
     xvfb \
     alsa-utils \
     unclutter \
