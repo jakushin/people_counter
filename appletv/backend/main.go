@@ -1713,6 +1713,8 @@ func findWindow() (string, int, int, error) {
 	lines := strings.Split(string(winInfoOut), "\n") 
 	log.Printf("[DEBUG] === ALL WINDOWS FROM XWININFO (total: %d) ===", windowCount)
 	count := 0
+	uxplayWindows := 0
+	videoWindows := 0
 	for _, line := range lines {
 		if strings.Contains(line, "0x") {
 			count++
@@ -1722,11 +1724,22 @@ func findWindow() (string, int, int, error) {
 			if strings.Contains(strings.ToLower(line), "uxplay") || 
 			   strings.Contains(strings.ToLower(line), "appletv") ||
 			   strings.Contains(strings.ToLower(line), "airplay") {
-				log.Printf("[DEBUG] >>> FOUND UxPlay-related window: %s", line)
+				uxplayWindows++
+				log.Printf("[DEBUG] 🎯 UXPLAY WINDOW #%d: %s", uxplayWindows, line)
+			}
+			
+			// Ищем видео окна (GStreamer, ximagesink, etc.)
+			if strings.Contains(strings.ToLower(line), "gstreamer") ||
+			   strings.Contains(strings.ToLower(line), "video") ||
+			   strings.Contains(strings.ToLower(line), "player") ||
+			   strings.Contains(strings.ToLower(line), "ximage") {
+				videoWindows++
+				log.Printf("[DEBUG] 📺 VIDEO WINDOW #%d: %s", videoWindows, line)
 			}
 		}
 	}
-	log.Printf("[DEBUG] === END WINDOW LIST ===")
+	log.Printf("[DEBUG] === WINDOW SUMMARY: Total=%d, UxPlay=%d, Video=%d, Potential=%d ===", 
+		windowCount, uxplayWindows, videoWindows, len(potentialVideoWindows))
 	
 	// Логируем все потенциальные видео окна
 	for i, win := range potentialVideoWindows {
