@@ -1829,7 +1829,7 @@ func findWindow() (string, int, int, error) {
 	
 	// Показываем все окна с ID размером больше 100x100
 	log.Printf("[WINDOW_DIAG] Анализ всех окон из xwininfo output:")
-	allWindows := strings.Split(string(winInfoOut), "\n")
+	allWindows = strings.Split(string(winInfoOut), "\n")
 	for i, line := range allWindows {
 		if strings.Contains(line, "0x") && strings.Contains(line, "x") {
 			log.Printf("[WINDOW_DIAG] Window %d: %s", i+1, line)
