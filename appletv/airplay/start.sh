@@ -212,21 +212,37 @@ else
   monitor_windows
   
   # Запускаем UxPlay с детальными логами и правильными параметрами
-  log_with_timestamp "Starting UxPlay with verbose logging..."
+  log_with_timestamp "Starting UxPlay with verbose logging and debug mode..."
   
   # Добавляем временную метку в начало логов UxPlay
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay starting with DISPLAY=$DISPLAY and VIDEO_SINK=$VIDEO_SINK..." > "$UXPLAY_LOG"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay parameters: -d (debug) -vs $VIDEO_SINK -s 1920x1080 -n AppleTV" >> "$UXPLAY_LOG"
   
   # Запускаем UxPlay с правильными переменными окружения для headless режима
   log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n \"AppleTV (Backend)\""
   
   # Устанавливаем переменные окружения для текущего процесса
   env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-    uxplay -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
   UXPLAY_PID=$!
   
   # Ждем дольше для запуска UxPlay и мониторим окна
   log_with_timestamp "Waiting for UxPlay to start and create window..."
+  
+  # Запускаем мониторинг UxPlay логов в фоне
+  (
+    tail -f "$UXPLAY_LOG" 2>/dev/null | while read line; do
+      echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay] $line"
+      # Важные события UxPlay
+      case "$line" in
+        *"client connected"*|*"connection"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] iPhone connection: $line" ;;
+        *"video"*|*"stream"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] Video stream: $line" ;;
+        *"window"*|*"display"*) echo "[$(date '+%Y-%m-%d %H:%M:%S')] [UxPlay-EVENT] Window/display: $line" ;;
+      esac
+    done
+  ) &
+  TAIL_PID=$!
+  
   for i in {1..20}; do
     if ps -p $UXPLAY_PID > /dev/null; then
       log_with_timestamp "UxPlay process is running (check $i/20)"
@@ -236,6 +252,12 @@ else
       UXPLAY_WINDOWS=$(xwininfo -root -tree -display :0 2>/dev/null | grep -i "uxplay\|airplay" | wc -l)
       
       log_with_timestamp "Windows total: $WINDOW_COUNT, UxPlay windows: $UXPLAY_WINDOWS"
+      
+      # Показываем последние UxPlay логи
+      if [ -f "$UXPLAY_LOG" ] && [ $(wc -l < "$UXPLAY_LOG") -gt 0 ]; then
+        LAST_UXPLAY_LOG=$(tail -1 "$UXPLAY_LOG" 2>/dev/null)
+        log_with_timestamp "Last UxPlay log: $LAST_UXPLAY_LOG"
+      fi
       
       if [ $UXPLAY_WINDOWS -gt 0 ]; then
         log_with_timestamp "UxPlay window(s) detected!"
@@ -261,7 +283,7 @@ else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay fallback starting..." >> "$UXPLAY_LOG"
     
     env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-      uxplay -vs ximagesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+      uxplay -d -vs ximagesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
     UXPLAY_PID=$!
     sleep 5
     

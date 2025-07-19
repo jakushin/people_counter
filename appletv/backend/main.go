@@ -3559,16 +3559,16 @@ func diagnoseUxPlayContainer() {
 	}
 	
 	// 3. Проверим логи UxPlay
-	logCmd := exec.Command("docker", "exec", "appletv-airplay-1", "tail", "-20", "/tmp/uxplay.log")
+	logCmd := exec.Command("docker", "exec", "appletv-airplay-1", "tail", "-30", "/var/log/appletv/uxplay.log")
 	logOut, logErr := logCmd.CombinedOutput()
 	if logErr != nil {
 		log.Printf("[UXPLAY_DIAG] Cannot read UxPlay logs: %v", logErr)
 	} else {
-		log.Printf("[UXPLAY_DIAG] === ПОСЛЕДНИЕ 20 СТРОК UXPLAY ЛОГОВ ===")
+		log.Printf("[UXPLAY_DIAG] === ПОСЛЕДНИЕ 30 СТРОК UXPLAY ЛОГОВ ===")
 		logLines := strings.Split(string(logOut), "\n")
 		for _, line := range logLines {
-			if line != "" {
-				log.Printf("[UXPLAY_DIAG] %s", line)
+			if strings.TrimSpace(line) != "" {
+				log.Printf("[UXPLAY_DIAG] UxPlay: %s", line)
 			}
 		}
 	}
