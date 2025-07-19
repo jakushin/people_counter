@@ -4,15 +4,23 @@ FROM ubuntu:24.04
 # Настройка окружения для неинтерактивной установки
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Установка базовых зависимостей и инструментов для сборки
 RUN apt-get update && apt-get install -y \
-    avahi-daemon \
-    uxplay \
-    mc \
-    tcpdump \
-    htop \
-    net-tools \
-    avahi-utils \
-    tzdata \
+    # Build tools
+    build-essential \
+    cmake \
+    git \
+    pkg-config \
+    # UxPlay dependencies
+    libssl-dev \
+    libplist-dev \
+    libavahi-client-dev \
+    libavahi-compat-libdnssd-dev \
+    # GStreamer development libraries
+    libgstreamer1.0-dev \
+    libgstreamer-plugins-base1.0-dev \
+    libgstreamer-plugins-bad1.0-dev \
+    # GStreamer runtime plugins
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
@@ -23,9 +31,15 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-alsa \
     gstreamer1.0-pulseaudio \
     gstreamer1.0-vaapi \
-    libavcodec-dev \
-    libavutil-dev \
-    libavformat-dev \
+    # System dependencies
+    avahi-daemon \
+    mc \
+    tcpdump \
+    htop \
+    net-tools \
+    avahi-utils \
+    tzdata \
+    # X11 and display
     xvfb \
     alsa-utils \
     unclutter \
@@ -57,6 +71,24 @@ RUN apt-get update && apt-get install -y \
 ENV TZ=Europe/Belgrade
 RUN ln -snf /usr/share/zoneinfo/Europe/Belgrade /etc/localtime && echo "Europe/Belgrade" > /etc/timezone
 RUN dpkg-reconfigure -f noninteractive tzdata
+
+# Скачиваем и компилируем UxPlay из исходного кода
+WORKDIR /tmp
+RUN git clone https://github.com/FDH2/UxPlay.git && \
+    cd UxPlay && \
+    echo "=== Building UxPlay from source ===" && \
+    git log --oneline -n 5 && \
+    echo "=== Latest commit info ===" && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    make -j$(nproc) && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/UxPlay
+
+# Проверяем установленную версию
+RUN uxplay --version 2>&1 | head -5 || echo "UxPlay installed successfully"
 
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
