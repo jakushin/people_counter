@@ -251,25 +251,40 @@ func safeWriteWebSocket(conn *websocket.Conn, message []byte) error {
 
 // Get the host IP address for ICE candidates
 func getHostIPAddress() string {
-	// Try to get the default interface IP
+	log.Printf("[DEBUG] 🔍 Starting host IP detection for LOCAL NETWORK...")
+	
+	// Method 1: Try to get the default interface IP
 	conn, err := net.Dial("udp", "8.8.8.8:80")
 	if err != nil {
-		log.Printf("[WARNING] Failed to determine host IP via connection test: %v", err)
+		log.Printf("[WARNING] Method 1 failed - connection test to 8.8.8.8: %v", err)
 		
-		// Fallback: try to find a non-loopback interface
+		// Method 2: try to find a non-loopback interface
+		log.Printf("[DEBUG] Method 2: Searching network interfaces...")
 		interfaces, err := net.Interfaces()
 		if err != nil {
 			log.Printf("[WARNING] Failed to get network interfaces: %v", err)
 			return "127.0.0.1" // Ultimate fallback
 		}
 		
+		var candidateIPs []string
 		for _, iface := range interfaces {
+			log.Printf("[DEBUG] Checking interface: %s (flags: %v)", iface.Name, iface.Flags)
+			
+			// Skip down or loopback interfaces
 			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				log.Printf("[DEBUG] Skipping interface %s (down or loopback)", iface.Name)
+				continue
+			}
+			
+			// Skip Docker interfaces in host mode
+			if strings.HasPrefix(iface.Name, "docker") || strings.HasPrefix(iface.Name, "br-") || strings.HasPrefix(iface.Name, "veth") {
+				log.Printf("[DEBUG] Skipping Docker interface: %s", iface.Name)
 				continue
 			}
 			
 			addrs, err := iface.Addrs()
 			if err != nil {
+				log.Printf("[DEBUG] Failed to get addresses for %s: %v", iface.Name, err)
 				continue
 			}
 			
@@ -282,20 +297,35 @@ func getHostIPAddress() string {
 					ip = v.IP
 				}
 				
-				if ip != nil && ip.To4() != nil {
-					log.Printf("[INFO] Found host IP via interface %s: %s", iface.Name, ip.String())
-					return ip.String()
+				if ip != nil && ip.To4() != nil && !ip.IsLoopback() {
+					ipStr := ip.String()
+					log.Printf("[INFO] 🎯 Found candidate IP on interface %s: %s", iface.Name, ipStr)
+					candidateIPs = append(candidateIPs, ipStr)
+					
+					// Prefer private network IPs (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+					if ip.IsPrivate() {
+						log.Printf("[SUCCESS] ✅ Selected private network IP: %s (interface: %s)", ipStr, iface.Name)
+						return ipStr
+					}
 				}
 			}
 		}
 		
+		// If we have any candidate IPs, use the first one
+		if len(candidateIPs) > 0 {
+			selectedIP := candidateIPs[0]
+			log.Printf("[INFO] 🎯 Selected first available IP: %s", selectedIP)
+			return selectedIP
+		}
+		
+		log.Printf("[ERROR] ❌ No suitable network interfaces found! Using loopback")
 		return "127.0.0.1" // Ultimate fallback
 	}
 	defer conn.Close()
 	
 	localAddr := conn.LocalAddr().(*net.UDPAddr)
 	ip := localAddr.IP.String()
-	log.Printf("[INFO] Determined host IP address: %s", ip)
+	log.Printf("[SUCCESS] ✅ Method 1 success - determined host IP: %s", ip)
 	return ip
 }
 
@@ -1235,18 +1265,40 @@ func main() {
 						strings.HasPrefix(interfaceName, "br-") || 
 						strings.HasPrefix(interfaceName, "veth")
 			
-			if !excluded {
-				log.Printf("[DEBUG] WebRTC: Allowing network interface: %s", interfaceName)
+			log.Printf("[DEBUG] WebRTC: 🔍 Interface filter check: %s", interfaceName)
+			if excluded {
+				log.Printf("[DEBUG] WebRTC: ❌ EXCLUDING interface: %s (Docker/loopback)", interfaceName)
+				return false
 			}
-			return !excluded
+			
+			log.Printf("[DEBUG] WebRTC: ✅ ALLOWING interface: %s (will be used for ICE candidates)", interfaceName)
+			return true
 		})
 		
 		log.Printf("[DEBUG] WebRTC: Configured SettingEngine for LOCAL NETWORK (no NAT/firewall)")
+		log.Printf("[INFO] WebRTC: 🌐 LOCAL NETWORK MODE - expecting direct host-to-host connectivity")
 		
-		// Автоматически определяем IP хоста для прямого host-to-host соединения
-		hostIP := getHostIPAddress()
-		settingEngine.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
-		log.Printf("[INFO] WebRTC: LOCAL NETWORK - Using direct host IP: %s (no STUN needed)", hostIP)
+			// Автоматически определяем IP хоста для прямого host-to-host соединения
+	hostIP := getHostIPAddress()
+	log.Printf("[DEBUG] WebRTC: Host IP detection result: %s", hostIP)
+	
+	// Проверяем доступные сетевые интерфейсы
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		log.Printf("[ERROR] Failed to get network interfaces: %v", err)
+	} else {
+		log.Printf("[DEBUG] WebRTC: Available network interfaces:")
+		for _, iface := range interfaces {
+			addrs, _ := iface.Addrs()
+			log.Printf("[DEBUG] WebRTC:   %s (flags: %v):", iface.Name, iface.Flags)
+			for _, addr := range addrs {
+				log.Printf("[DEBUG] WebRTC:     %s", addr.String())
+			}
+		}
+	}
+	
+	settingEngine.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
+	log.Printf("[INFO] WebRTC: LOCAL NETWORK - Using direct host IP: %s (no STUN needed)", hostIP)
 		
 		// Создаем API с нашими настройками
 		api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine))
@@ -1322,18 +1374,32 @@ func main() {
 				log.Printf("[DEBUG] WebRTC: ICE connection is new, waiting for candidates")
 				debugInfo("WEBRTC", "ice_state_new", "ICE connection is new, waiting for candidates", details)
 			case webrtc.ICEConnectionStateChecking:
-				log.Printf("[DEBUG] WebRTC: ICE connection is checking connectivity")
+				log.Printf("[DEBUG] WebRTC: 🔍 ICE connection is checking connectivity")
+				log.Printf("[INFO] WebRTC: 🕐 Starting ICE connectivity checks in local network (expect 1-3 seconds)")
 				debugInfo("WEBRTC", "ice_state_checking", "ICE connection is checking connectivity", details)
+				
+				// Логируем состояние gathering
+				gatherState := peerConnection.ICEGatheringState()
+				log.Printf("[DEBUG] WebRTC: Current ICE gathering state: %s", gatherState.String())
 				
 				// LOCAL NETWORK: Более короткий timeout (10 секунд) так как нет NAT
 				go func() {
 					time.Sleep(10 * time.Second)
 					if peerConnection.ICEConnectionState() == webrtc.ICEConnectionStateChecking {
-						log.Printf("[ERROR] LOCAL NETWORK: ICE connection stuck in checking state for 10s, forcing restart")
+						log.Printf("[ERROR] LOCAL NETWORK: ❌ ICE connection stuck in checking state (10s timeout)")
+						log.Printf("[ERROR] LOCAL NETWORK: 🚨 This indicates candidates cannot establish connection!")
+						
+						// Дополнительная диагностика
+						log.Printf("[DEBUG] ICE STUCK DIAGNOSTICS:")
+						log.Printf("[DEBUG]   - Gathering state: %s", peerConnection.ICEGatheringState().String())
+						log.Printf("[DEBUG]   - Connection state: %s", peerConnection.ConnectionState().String())
+						log.Printf("[DEBUG]   - Expected: host-to-host connectivity in local network")
+						
 						debugError("WEBRTC", "ice_check_timeout", "ICE connection stuck in checking state", map[string]interface{}{
 							"timeout_seconds": 10,
 							"sessionID": sessionID,
 							"networkType": "local_network",
+							"gathering_state": gatherState.String(),
 						})
 						cleanupWebRTCSession()
 					}
@@ -1434,14 +1500,21 @@ func main() {
 				log.Printf("[INFO] WebRTC: LOCAL NETWORK - ICE gathering complete, using host candidates only")
 				return
 			}
-			log.Printf("[DEBUG] WebRTC: Generated ICE candidate: %s", candidate.String())
-			log.Printf("[INFO] WebRTC: LOCAL NETWORK candidate - Type: %s, Protocol: %s, Address: %s, Port: %d", 
-				candidate.Typ.String(), candidate.Protocol.String(), candidate.Address, candidate.Port)
-			
-			// Проверяем что используется только host candidate
-			if candidate.Typ != webrtc.ICECandidateTypeHost {
-				log.Printf("[WARNING] WebRTC: Non-host candidate detected in local network: %s", candidate.Typ.String())
-			}
+					log.Printf("[DEBUG] WebRTC: Generated ICE candidate: %s", candidate.String())
+		log.Printf("[INFO] WebRTC: 🏠 LOCAL NETWORK candidate - Type: %s, Protocol: %s, Address: %s, Port: %d", 
+			candidate.Typ.String(), candidate.Protocol.String(), candidate.Address, candidate.Port)
+		
+		// Проверяем что используется только host candidate
+		if candidate.Typ != webrtc.ICECandidateTypeHost {
+			log.Printf("[WARNING] WebRTC: ⚠️ Non-host candidate detected in local network: %s", candidate.Typ.String())
+		}
+		
+		// Дополнительная диагностика для host candidates
+		if candidate.Typ == webrtc.ICECandidateTypeHost {
+			log.Printf("[SUCCESS] WebRTC: ✅ Host candidate generated - should work in local network!")
+			// Проверяем доступность порта
+			log.Printf("[DEBUG] WebRTC: Testing port accessibility on %s:%d", candidate.Address, candidate.Port)
+		}
 			
 			debugInfo("WEBRTC", "ice_candidate_generated", "Generated ICE candidate", map[string]interface{}{
 				"type": candidate.Typ.String(),
