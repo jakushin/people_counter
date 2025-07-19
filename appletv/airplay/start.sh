@@ -230,14 +230,14 @@ else
   
   # Добавляем временную метку в начало логов UxPlay
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay starting with DISPLAY=$DISPLAY and VIDEO_SINK=$VIDEO_SINK..." > "$UXPLAY_LOG"
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay parameters: -d (debug) -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n AppleTV" >> "$UXPLAY_LOG"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay parameters: -d (debug) -vs $VIDEO_SINK -s 1920x1080 -n AppleTV" >> "$UXPLAY_LOG"
   
   # Запускаем UxPlay с правильными переменными окружения для headless режима
-  log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n \"AppleTV (Backend)\""
+  log_with_timestamp "UxPlay command: DISPLAY=:0 XAUTHORITY=/root/.Xauthority uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n \"AppleTV (Backend)\""
   
   # Устанавливаем переменные окружения для текущего процесса
   env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -avdec -ao pulsesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
   UXPLAY_PID=$!
   
   # Ждем дольше для запуска UxPlay и мониторим окна
@@ -297,7 +297,7 @@ else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] UxPlay fallback starting..." >> "$UXPLAY_LOG"
     
           env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-        uxplay -d -vs ximagesink -s 1920x1080 -avdec -ao pulsesink -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+        uxplay -d -vs ximagesink -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
     UXPLAY_PID=$!
     sleep 5
     
