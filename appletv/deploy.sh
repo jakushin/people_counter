@@ -79,6 +79,24 @@ if [ -d frontend ]; then
     fi
 fi
 
+echo "Cleaning up logs directory..."
+if [ ! -d logs ]; then
+    echo "Creating logs directory..."
+    mkdir -p logs
+else
+    echo "Logs directory exists, checking contents..."
+    if [ "$(ls -A logs/)" ]; then
+        echo "Found log files in logs directory:"
+        ls -la logs/
+        echo "Removing all files from logs directory..."
+        rm -f logs/*
+        echo "All log files removed."
+    else
+        echo "Logs directory is already empty."
+    fi
+fi
+echo "Logs directory is ready."
+
 echo "Stopping and cleaning up Docker..."
 docker compose down
 docker system prune -af

@@ -105,17 +105,17 @@ export default function WebRTCStream() {
         console.log('WebRTC connection state:', state);
         
         if (state === 'connected') {
-          setStatusWithLog('connected');
+          setStatus('connected');
           setError(null);
           setServerStatus(null);
           console.log('WebRTC connected successfully!');
         } else if (state === 'failed' || state === 'disconnected') {
-          setStatusWithLog('failed');
+          setStatus('failed');
           setError('WebRTC connection failed');
           setIsConnecting(false);
           console.error('WebRTC connection failed or disconnected');
         } else if (state === 'closed') {
-          setStatusWithLog('stopped');
+          setStatus('stopped');
           setIsConnecting(false);
           console.log('WebRTC connection closed');
         }
@@ -187,7 +187,7 @@ export default function WebRTCStream() {
       console.error('Auto-reconnection failed:', err);
       console.log(`WebRTC Debug: Auto-reconnection failed: ${err.message}`);
       setError('Auto-reconnection failed: ' + err.message);
-      setStatusWithLog('failed');
+      setStatus('failed');
       setIsConnecting(false);
     }
   };
@@ -197,7 +197,7 @@ export default function WebRTCStream() {
     if (isConnecting) return;
     
     setIsConnecting(true);
-    setStatusWithLog('connecting');
+    setStatus('connecting');
     setError(null);
 
     try {
@@ -259,7 +259,7 @@ export default function WebRTCStream() {
           setTimeout(() => {
             if (pcRef.current && pcRef.current.connectionState === 'connected' && status !== 'connected') {
               console.log('🔧 FORCE: ICE connected but status not updated, forcing status to connected');
-              setStatusWithLog('connected');
+              setStatus('connected');
               setError(null);
               setIsConnecting(false);
             }
@@ -341,7 +341,7 @@ export default function WebRTCStream() {
                 setServerStatus('WebRTC connected (auto-corrected)');
               } else if (currentIceState === 'connected' && currentConnectionState !== 'failed' && status === 'connecting') {
                 console.log('🔧 FORCE FIX: ICE connected but UI still shows connecting, updating...');
-                setStatusWithLog('connected');
+                setStatus('connected');
                 setError(null);
                 setIsConnecting(false);
                 setServerStatus('WebRTC connected (ICE ready)');
@@ -351,7 +351,7 @@ export default function WebRTCStream() {
         } catch (err) {
           console.log(`WebRTC Debug: Failed to create offer: ${err.message}`);
           setError('Failed to create offer: ' + err.message);
-          setStatusWithLog('failed');
+          setStatus('failed');
           setIsConnecting(false);
         }
       };
@@ -422,22 +422,22 @@ export default function WebRTCStream() {
           } else if (message.type === 'error') {
             console.log(`WebRTC Debug: Server error: ${message.message}`);
             setError('Server error: ' + message.message);
-            setStatusWithLog('failed');
+            setStatus('failed');
             setIsConnecting(false);
           } else if (message.type === 'airplay_disconnected') {
             console.log(`WebRTC Debug: iPhone disconnected: ${message.message}`);
             setServerStatus('iPhone disconnected - waiting for reconnection...');
-            setStatusWithLog('disconnected');
+            setStatus('disconnected');
             // Don't set isConnecting to false - we want to keep the WebSocket open for auto-reconnect
           } else if (message.type === 'airplay_reconnecting') {
             console.log(`WebRTC Debug: iPhone reconnecting: ${message.message}`);
             setServerStatus('iPhone reconnected - starting WebRTC...');
-            setStatusWithLog('connecting');
+            setStatus('connecting');
             setError(null);
           } else if (message.type === 'webrtc_ready') {
             console.log(`WebRTC Debug: WebRTC auto-reconnected: ${message.message}`);
             setServerStatus('WebRTC connected successfully');
-            setStatusWithLog('connected');
+            setStatus('connected');
             setError(null);
           } else if (message.type === 'reconnection_ready') {
             console.log(`WebRTC Debug: System ready for reconnection: ${message.message}`);
@@ -450,7 +450,7 @@ export default function WebRTCStream() {
             }
             
             setServerStatus('iPhone reconnected - auto-reconnecting in 5 seconds');
-            setStatusWithLog('ready_for_reconnect');
+            setStatus('ready_for_reconnect');
             setError(null);
             startAutoReconnectCountdown();
           } else if (message.type === 'window_changed') {
@@ -464,7 +464,7 @@ export default function WebRTCStream() {
             }
             
             setServerStatus('iPhone reconnected with new window - auto-reconnecting in 5 seconds');
-            setStatusWithLog('ready_for_reconnect');
+            setStatus('ready_for_reconnect');
             setError(null);
             startAutoReconnectCountdown();
           }
@@ -477,7 +477,7 @@ export default function WebRTCStream() {
       websocket.onerror = (err) => {
         console.error('WebSocket error:', err);
         setError('WebSocket connection failed');
-        setStatusWithLog('failed');
+        setStatus('failed');
         setIsConnecting(false);
       };
 
@@ -486,7 +486,7 @@ export default function WebRTCStream() {
         console.log('WebRTC Debug: WebSocket connection closed by server');
         
         if (status !== 'stopped') {
-          setStatusWithLog('disconnected');
+          setStatus('disconnected');
           setIsConnecting(false);
           
           // Автоматическое переподключение через 2 секунды
@@ -503,7 +503,7 @@ export default function WebRTCStream() {
     } catch (err) {
       console.error('Failed to start WebRTC:', err);
       setError('Failed to start WebRTC: ' + err.message);
-      setStatusWithLog('failed');
+      setStatus('failed');
       setIsConnecting(false);
     }
   };
@@ -516,7 +516,7 @@ export default function WebRTCStream() {
     cancelAutoReconnect();
     
     setIsConnecting(false);
-    setStatusWithLog('stopped');
+    setStatus('stopped');
     setError(null);
     setServerStatus(null); // Очищаем статус сервера
     setConnectionState('new');
