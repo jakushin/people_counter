@@ -252,7 +252,24 @@ export default function WebRTCStream() {
     console.log(`🚀 START WEBRTC CALLED - isConnecting: ${isConnecting}, status: ${status}`);
     
     if (isConnecting) {
-      console.log(`🚫 START WEBRTC BLOCKED - isConnecting is already true, returning early`);
+      console.log(`🚫 START WEBRTC BLOCKED - isConnecting is already true`);
+      
+      // ИСПРАВЛЕНИЕ: Проверяем нет ли "застрявшего" состояния и принудительно сбрасываем если нет активных соединений
+      const hasActiveConnections = (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) || 
+                                   (pcRef.current && pcRef.current.connectionState === 'connected');
+      
+      if (!hasActiveConnections && status !== 'connecting') {
+        console.log(`🔧 RECONNECT FIX: isConnecting=true but no active connections, forcing reset`);
+        setIsConnecting(false);
+        // Retry after small delay
+        setTimeout(() => {
+          console.log(`🔄 RECONNECT FIX: Retrying startWebRTC after forced reset`);
+          startWebRTC();
+        }, 100);
+        return;
+      }
+      
+      console.log(`🚫 START WEBRTC BLOCKED - returning early (has active connections)`);
       return;
     }
     
@@ -673,6 +690,9 @@ export default function WebRTCStream() {
     cancelAutoReconnect();
     
     console.log(`🛑 STOP WEBRTC - Current state: isConnecting=${isConnecting}, status=${status}`);
+    
+    // ИСПРАВЛЕНИЕ: Принудительно сбрасываем флаг isConnecting для предотвращения блокировки повторных подключений
+    console.log(`🔧 RECONNECT FIX: Force resetting isConnecting=${isConnecting} to false to allow future connections`);
     setIsConnecting(false);
     setStatusWithLog('stopped');
     console.log(`🛑 STOP WEBRTC - Set isConnecting=false, status=stopped`);
@@ -763,8 +783,14 @@ export default function WebRTCStream() {
         <button 
           onClick={() => {
             console.log(`🖱️ START BUTTON CLICKED - isConnecting: ${isConnecting}, status: ${status}, autoReconnectCountdown: ${autoReconnectCountdown}`);
+            
+            // ИСПРАВЛЕНИЕ: Детальная диагностика состояния при нажатии Start
+            const wsState = wsRef.current ? wsRef.current.readyState : 'null';
+            const pcState = pcRef.current ? pcRef.current.connectionState : 'null';
+            console.log(`🔍 RECONNECT DIAGNOSTICS - WebSocket: ${wsState}, PeerConnection: ${pcState}`);
+            
             if (window.debugLogUserAction) {
-              window.debugLogUserAction('Start Button Clicked', `isConnecting: ${isConnecting}, status: ${status}`);
+              window.debugLogUserAction('Start Button Clicked', `isConnecting: ${isConnecting}, status: ${status}, WS: ${wsState}, PC: ${pcState}`);
             }
             startWebRTC();
           }}
@@ -820,6 +846,48 @@ export default function WebRTCStream() {
         >
           Stop
         </button>
+
+        {/* ИСПРАВЛЕНИЕ: Кнопка для принудительного сброса "застрявшего" состояния */}
+        {(isConnecting && status !== 'connecting' && status !== 'connected') && (
+          <button 
+            onClick={() => {
+              console.log(`🔧 FORCE RESET CLICKED - isConnecting: ${isConnecting}, status: ${status}`);
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Force Reset', `Forcing reset from stuck state: isConnecting: ${isConnecting}, status: ${status}`);
+              }
+              
+              // Принудительный сброс всех состояний
+              setIsConnecting(false);
+              setStatusWithLog('stopped');
+              setError(null);
+              setServerStatus(null);
+              
+              // Очистка всех соединений
+              if (wsRef.current) {
+                wsRef.current.close();
+                wsRef.current = null;
+              }
+              if (pcRef.current) {
+                pcRef.current.close();
+                pcRef.current = null;
+              }
+              
+              console.log(`🔧 FORCE RESET COMPLETE - state reset to allow new connections`);
+            }}
+            style={{
+              padding:'8px 16px',
+              backgroundColor: '#fd7e14',
+              color: 'white',
+              border: 'none',
+              borderRadius:'4px',
+              cursor: 'pointer',
+              fontSize: '12px'
+            }}
+            title="Принудительно сбросить застрявшее состояние"
+          >
+            Force Reset
+          </button>
+        )}
 
       </div>
 
