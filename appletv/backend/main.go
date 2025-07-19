@@ -265,10 +265,24 @@ func waitForUxPlayWindowSimple(timeout time.Duration) (*AirPlayWindow, error) {
 	log.Printf("[INFO] WebRTC: Waiting for UxPlay window (timeout: %v)", timeout)
 	
 	startTime := time.Now()
+	lastStatusTime := time.Time{}
 	
 	for {
 		if time.Since(startTime) > timeout {
 			return nil, fmt.Errorf("timeout: UxPlay window not found within %v", timeout)
+		}
+		
+		// Send status updates to client every 3 seconds
+		if time.Since(lastStatusTime) >= 3*time.Second {
+			remaining := timeout - time.Since(startTime)
+			if activeWebSocketConn != nil {
+				status := fmt.Sprintf("Waiting for iPhone connection... (%.0fs remaining)", remaining.Seconds())
+				notifyWebSocketClient(map[string]interface{}{
+					"type":    "status",
+					"message": status,
+				})
+			}
+			lastStatusTime = time.Now()
 		}
 		
 		// ИСПРАВЛЕНО: Используем findWindow() вместо getUxPlayWindows()
@@ -276,6 +290,15 @@ func waitForUxPlayWindowSimple(timeout time.Duration) (*AirPlayWindow, error) {
 		if err == nil && windowID != "" && width >= 100 && height >= 100 {
 			log.Printf("[SUCCESS] WebRTC: Found UxPlay window after %v - ID: %s, Size: %dx%d", 
 				time.Since(startTime), windowID, width, height)
+			
+			// Notify client about success
+			if activeWebSocketConn != nil {
+				notifyWebSocketClient(map[string]interface{}{
+					"type":    "status",
+					"message": "iPhone connected! Initializing video stream...",
+				})
+			}
+			
 			return &AirPlayWindow{
 				ID:     windowID,
 				Name:   "UxPlay Window",
@@ -1300,23 +1323,8 @@ func main() {
 				goto messageLoop
 			}
 		} else {
-			// Ожидание UxPlay окна с уведомлениями клиента (только если iPhone не готов)
-			var windowID string
-			var width, height int
-			var err error
-			windowID, width, height, err = waitForUxPlayWindow(conn, 60*time.Second)
-					if err != nil {
-			log.Printf("[ERROR] WebRTC: Failed to find UxPlay window within timeout: %v", err)
-			// Clear reserved session on error
-			sessionMutex.Lock()
-			activeSession = nil
-			sessionMutex.Unlock()
-			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"AirPlay window not available - please connect your device"}`))
-			return
-		}
-			
-			log.Printf("[INFO] WebRTC: Window validation passed - ID: %s, Size: %dx%d", windowID, width, height)
-			log.Printf("[INFO] WebRTC: Waiting for SDP offer to initialize WebRTC session")
+			// No blocking wait for UxPlay window - check it only when needed for media initialization
+			log.Printf("[INFO] WebRTC: Ready to process SDP offer, UxPlay window will be checked when media tracks are initialized")
 		}
 
 		log.Printf("[INFO] WebRTC: PeerConnection ready, waiting for signaling messages")
@@ -1391,11 +1399,11 @@ func main() {
 				if hasNoTracks {
 					log.Printf("[WebRTC] Initializing WebRTC session for SDP offer")
 					
-					// Get current UxPlay window
-					currentWindow, err := waitForUxPlayWindowSimple(5 * time.Second)
+					// Get current UxPlay window (increased timeout for user to connect iPhone)
+					currentWindow, err := waitForUxPlayWindowSimple(15 * time.Second)
 					if err != nil {
 						log.Printf("[ERROR] Failed to find UxPlay window: %v", err)
-						conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"UxPlay window not available"}`))
+						conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"UxPlay window not available - please connect your iPhone to AirPlay and try again"}`))
 						continue
 					}
 					
