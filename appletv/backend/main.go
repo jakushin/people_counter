@@ -144,6 +144,12 @@ func (dl *DebugLogger) SaveToFile() error {
 	dl.mutex.RLock()
 	defer dl.mutex.RUnlock()
 	
+	// Ensure the directory exists
+	logDir := "/var/log/appletv"
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		return fmt.Errorf("failed to create log directory: %v", err)
+	}
+	
 	filePath := "/var/log/appletv/debug.txt"
 	file, err := os.Create(filePath)
 	if err != nil {
@@ -348,10 +354,13 @@ func isTimeoutError(err error) bool {
 // Безопасная очистка WebRTC сессии
 func (s *WebRTCSession) Cleanup() {
 	if s == nil {
+		log.Printf("[DEBUG] CLEANUP: Called on nil session")
 		return
 	}
 	
-	log.Printf("[INFO] WebRTC: Cleaning up session %s (uptime: %.1fs)", s.ID, time.Since(s.StartTime).Seconds())
+	log.Printf("[INFO] *** CLEANUP START *** Session %s (uptime: %.1fs)", s.ID, time.Since(s.StartTime).Seconds())
+	log.Printf("[DEBUG] CLEANUP: Session components - FFmpeg=%v, VideoConn=%v, AudioConn=%v, PeerConn=%v, WebSocket=%v", 
+		s.FFmpegCmd != nil, s.VideoConn != nil, s.AudioConn != nil, s.PeerConn != nil, s.WebSocket != nil)
 	
 	// 1. Отменить context для всех goroutines
 	if s.CancelFunc != nil {
@@ -391,7 +400,7 @@ func (s *WebRTCSession) Cleanup() {
 		}
 	}
 	
-	log.Printf("[SUCCESS] WebRTC: Session %s cleanup completed", s.ID)
+	log.Printf("[SUCCESS] *** CLEANUP COMPLETED *** Session %s cleanup finished", s.ID)
 }
 
 // Частичная очистка для auto-reconnection (сохраняет WebSocket)
@@ -440,13 +449,18 @@ func cleanupActiveSession() {
 	defer sessionMutex.Unlock()
 	
 	if activeSession != nil {
-		log.Printf("[INFO] WebRTC: Force cleaning up active session before starting new one")
+		log.Printf("[INFO] *** FORCE CLEANUP ACTIVE SESSION *** ID=%s before starting new one", activeSession.ID)
+		log.Printf("[DEBUG] FORCE CLEANUP: Session state before cleanup - Uptime=%.1fs, PeerConn=%v", 
+			time.Since(activeSession.StartTime).Seconds(), activeSession.PeerConn != nil)
 		activeSession.Cleanup()
 		activeSession = nil
+		log.Printf("[DEBUG] *** ACTIVE SESSION SET TO NIL *** cleanup completed")
 		
 		// ИСПРАВЛЕНО: НЕ отключаем auto-reconnect при очистке сессии
 		// Автоматическое переподключение должно оставаться активным
 		log.Printf("[DEBUG] WebRTC: Auto-reconnect remains enabled after session cleanup")
+	} else {
+		log.Printf("[DEBUG] FORCE CLEANUP: No active session to clean up")
 	}
 }
 
@@ -930,19 +944,51 @@ func main() {
 
 			sessionMutex.Lock()
 	hasActiveSession := activeSession != nil
+	if hasActiveSession {
+		log.Printf("[DEBUG] ACTIVE SESSION EXISTS: ID=%s, Uptime=%.1fs, HasPeerConn=%v, HasWebSocket=%v", 
+			activeSession.ID, time.Since(activeSession.StartTime).Seconds(), 
+			activeSession.PeerConn != nil, activeSession.WebSocket != nil)
+		if activeSession.PeerConn != nil {
+			log.Printf("[DEBUG] ACTIVE SESSION PeerConnection State=%s, ICE State=%s", 
+				activeSession.PeerConn.ConnectionState().String(), 
+				activeSession.PeerConn.ICEConnectionState().String())
+		}
+	} else {
+		log.Printf("[DEBUG] NO ACTIVE SESSION - creating new session slot")
+	}
+	
 	if !hasActiveSession {
 		// Reserve session slot immediately to prevent race conditions
 		activeSession = &WebRTCSession{
 			ID: "reserved_" + fmt.Sprintf("%d", time.Now().Unix()),
 		}
-		log.Printf("[DEBUG] Session slot reserved, starting WebRTC setup")
+		log.Printf("[DEBUG] Session slot reserved: %s, starting WebRTC setup", activeSession.ID)
 	}
 	sessionMutex.Unlock()
 	
 	if hasActiveSession {
-		log.Printf("[WARNING] WebRTC session already active, rejecting new connection")
-		http.Error(w, "WebRTC session already active", http.StatusConflict)
-		return
+		log.Printf("[WARNING] WebRTC session already active - attempting cleanup before new connection")
+		
+		// Try to cleanup the existing session instead of rejecting
+		sessionMutex.Lock()
+		if activeSession != nil {
+			log.Printf("[DEBUG] CONFLICT RESOLUTION: Cleaning up existing session %s", activeSession.ID)
+			activeSession.Cleanup()
+			activeSession = nil
+			log.Printf("[DEBUG] CONFLICT RESOLUTION: Existing session cleaned up, proceeding with new connection")
+		}
+		sessionMutex.Unlock()
+		
+		// Small delay to ensure cleanup is complete
+		time.Sleep(100 * time.Millisecond)
+		
+		// Now reserve new session slot
+		sessionMutex.Lock()
+		activeSession = &WebRTCSession{
+			ID: "reserved_" + fmt.Sprintf("%d", time.Now().Unix()),
+		}
+		log.Printf("[DEBUG] CONFLICT RESOLUTION: New session slot reserved: %s", activeSession.ID)
+		sessionMutex.Unlock()
 	}
 
 	log.Printf("[DEBUG] === WebRTC Signaling Started ===")
@@ -958,8 +1004,10 @@ func main() {
 		
 		// Store WebSocket connection reference for auto-reconnection
 		activeWebSocketConn = conn
+		log.Printf("[DEBUG] *** WEBSOCKET STORED *** activeWebSocketConn set to new connection")
 		defer func() {
 			// Clear WebSocket reference when connection closes
+			log.Printf("[DEBUG] *** WEBSOCKET DEFER CLEANUP *** clearing activeWebSocketConn")
 			activeWebSocketConn = nil
 			// ИСПРАВЛЕНО: НЕ отключаем auto-reconnect при закрытии WebSocket
 			// Автоматическое переподключение должно работать независимо от WebSocket
@@ -1049,19 +1097,29 @@ func main() {
 		// Создаем API с нашими настройками
 		api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine))
 		
-		log.Printf("[DEBUG] WebRTC: Creating PeerConnection for host network mode")
+		sessionMutex.Lock()
+		currentSessionID := ""
+		if activeSession != nil {
+			currentSessionID = activeSession.ID
+		}
+		sessionMutex.Unlock()
+		
+		log.Printf("[DEBUG] *** CREATING PEERCONNECTION *** for session %s in host network mode", currentSessionID)
 		peerConnection, err := api.NewPeerConnection(config)
 		if err != nil {
-			log.Printf("[ERROR] Failed to create PeerConnection: %v", err)
+			log.Printf("[ERROR] *** PEERCONNECTION CREATION FAILED *** %v", err)
 			// Clear reserved session on error
 			sessionMutex.Lock()
+			if activeSession != nil {
+				log.Printf("[DEBUG] Clearing failed session %s", activeSession.ID)
+			}
 			activeSession = nil
 			sessionMutex.Unlock()
 			conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to create peer connection"}`))
 			return
 		}
 		
-		log.Printf("[INFO] WebRTC: PeerConnection created successfully")
+		log.Printf("[INFO] *** PEERCONNECTION CREATED SUCCESSFULLY *** for session %s", currentSessionID)
 		
 		// Создаем новую WebRTC сессию (moved up to avoid goto issues)
 		sessionCtx, sessionCancel := context.WithCancel(context.Background())
@@ -1290,6 +1348,15 @@ func main() {
 
 			switch msg["type"] {
 			case "offer":
+				log.Printf("[DEBUG] *** SDP OFFER RECEIVED *** from client %s", r.RemoteAddr)
+				sessionMutex.Lock()
+				if activeSession != nil {
+					log.Printf("[DEBUG] SDP OFFER: Current session ID=%s, PeerConn exists=%v", 
+						activeSession.ID, activeSession.PeerConn != nil)
+				} else {
+					log.Printf("[DEBUG] SDP OFFER: ERROR - No active session found!")
+				}
+				sessionMutex.Unlock()
 				log.Printf("[DEBUG] WebRTC: Processing SDP offer")
 				debugInfo("WEBRTC", "sdp_offer_received", "Processing SDP offer from client")
 				
