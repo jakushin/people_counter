@@ -6,16 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
     avahi-daemon \
-    ffmpeg \
-    git \
-    build-essential \
-    libasound2-dev \
-    libavahi-client-dev \
-    libssl-dev \
-    libplist-dev \
-    libpulse-dev \
-    libjpeg-dev \
-    libavahi-compat-libdnssd-dev \
+    uxplay \
     mc \
     tcpdump \
     htop \
@@ -30,10 +21,6 @@ RUN apt-get update && apt-get install -y \
     gstreamer1.0-x \
     gstreamer1.0-alsa \
     gstreamer1.0-pulseaudio \
-    libgstreamer1.0-0 \
-    libgstreamer-plugins-base1.0-0 \
-    libgstreamer1.0-dev \
-    libgstreamer-plugins-base1.0-dev \
     xvfb \
     alsa-utils \
     unclutter \
@@ -59,22 +46,7 @@ RUN apt-get update && apt-get install -y \
     libgles2-mesa-dev \
     libegl1-mesa-dev \
     mesa-utils \
-    cmake \
-    pkg-config \
     && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /opt
-
-# Установка uxplay из source, поскольку может отсутствовать в репозиториях
-RUN git clone https://github.com/FDH2/UxPlay.git && \
-    cd UxPlay && \
-    mkdir build && \
-    cd build && \
-    cmake .. && \
-    make && \
-    make install && \
-    cd /opt && \
-    rm -rf UxPlay
 
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
