@@ -1579,6 +1579,24 @@ func getWindowCount() int {
 func findWindow() (string, int, int, error) {
 	// Поиск UxPlay окна (используется UxPlay монитором)
 	
+	// ДИАГНОСТИКА: Проверяем запущен ли UxPlay процесс
+	psCmd := exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
+	psOut, psErr := psCmd.Output()
+	if psErr != nil {
+		log.Printf("[ERROR] Failed to check processes in airplay container: %v", psErr)
+	} else {
+		uxplayRunning := false
+		for _, line := range strings.Split(string(psOut), "\n") {
+			if strings.Contains(strings.ToLower(line), "uxplay") {
+				log.Printf("[DEBUG] UxPlay process found: %s", strings.TrimSpace(line))
+				uxplayRunning = true
+			}
+		}
+		if !uxplayRunning {
+			log.Printf("[ERROR] UxPlay process NOT RUNNING in airplay container!")
+		}
+	}
+	
 	// Проверяем X11 соединение
 	displayCmd := exec.Command("xset", "q")
 	displayCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
@@ -1594,6 +1612,34 @@ func findWindow() (string, int, int, error) {
 	if err != nil {
 		log.Printf("[ERROR] xwininfo failed in airplay container: %v", err)
 		log.Printf("[ERROR] xwininfo stderr output: %s", string(winInfoOut))
+		
+		// Проверяем статус UxPlay процесса и логи
+		uxplayCmd := exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
+		uxplayOut, uxplayErr := uxplayCmd.Output()
+		if uxplayErr != nil {
+			log.Printf("[ERROR] Failed to check UxPlay process: %v", uxplayErr)
+		} else {
+			log.Printf("[DEBUG] Processes in airplay container:")
+			for _, line := range strings.Split(string(uxplayOut), "\n") {
+				if strings.Contains(strings.ToLower(line), "uxplay") || strings.Contains(line, "CMD") {
+					log.Printf("[DEBUG] %s", line)
+				}
+			}
+		}
+		
+		// Проверяем UxPlay логи
+		logCmd := exec.Command("docker", "exec", "appletv-airplay-1", "tail", "-10", "/var/log/appletv/uxplay.log")
+		logOut, logErr := logCmd.Output()
+		if logErr != nil {
+			log.Printf("[ERROR] Failed to read UxPlay logs: %v", logErr)
+		} else {
+			log.Printf("[DEBUG] Last UxPlay logs:")
+			for _, line := range strings.Split(string(logOut), "\n") {
+				if strings.TrimSpace(line) != "" {
+					log.Printf("[DEBUG] UxPlay: %s", line)
+				}
+			}
+		}
 		
 		// Try to check if container exists
 		checkCmd := exec.Command("docker", "ps", "--filter", "name=airplay", "--format", "{{.Names}}")
@@ -1662,6 +1708,25 @@ func findWindow() (string, int, int, error) {
 	
 	log.Printf("[DEBUG] Total windows: %d, OpenGL-related: %d, Potential video windows: %d", 
 		windowCount, openglWindows, len(potentialVideoWindows))
+	
+	// Диагностическое логирование: показываем ВСЕ окна для анализа UxPlay проблемы
+	lines := strings.Split(string(winInfoOut), "\n") 
+	log.Printf("[DEBUG] === ALL WINDOWS FROM XWININFO (total: %d) ===", windowCount)
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, "0x") {
+			count++
+			log.Printf("[DEBUG] Window %d: %s", count, strings.TrimSpace(line))
+			
+			// Проверяем каждое окно на соответствие критериям UxPlay
+			if strings.Contains(strings.ToLower(line), "uxplay") || 
+			   strings.Contains(strings.ToLower(line), "appletv") ||
+			   strings.Contains(strings.ToLower(line), "airplay") {
+				log.Printf("[DEBUG] >>> FOUND UxPlay-related window: %s", line)
+			}
+		}
+	}
+	log.Printf("[DEBUG] === END WINDOW LIST ===")
 	
 	// Логируем все потенциальные видео окна
 	for i, win := range potentialVideoWindows {
@@ -2267,9 +2332,12 @@ func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
 			// Сохраняем контент из UI в debug.txt
 			filename = "/var/log/appletv/debug.txt"
 			
-			// Добавляем заголовок с временной меткой
-			content := fmt.Sprintf("=== DEBUG LOG SAVED AT %s ===\n\n%s", 
-				time.Now().Format("2006-01-02 15:04:05"), requestBody.DebugContent)
+			// Добавляем заголовок с временной меткой и информацией
+			content := fmt.Sprintf("=== DEBUG LOG SAVED AT %s ===\n=== UI MESSAGES COUNT: %d ===\n=== CONTENT SIZE: %d CHARS ===\n\n%s", 
+				time.Now().Format("2006-01-02 15:04:05"), 
+				strings.Count(requestBody.DebugContent, "\n")+1,
+				len(requestBody.DebugContent),
+				requestBody.DebugContent)
 			
 			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
 				debugError("DEBUG", "save_failed", "Failed to save UI debug log to file", map[string]interface{}{

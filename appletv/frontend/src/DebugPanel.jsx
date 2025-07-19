@@ -115,14 +115,28 @@ export default function DebugPanel() {
     logUserAction('Save Debug Log', 'Attempting to save debug.txt');
     setIsSaving(true);
     try {
-      // Подготавливаем все сообщения из UI для сохранения
-      const debugContent = messages.map(msg => {
+      // Подготавливаем все сообщения из UI для сохранения  
+      console.log(`[DEBUG] Saving ${messages.length} messages to debug.txt`);
+      const debugContent = messages.map((msg, index) => {
+        let line = '';
         if (typeof msg === 'string') {
-          return msg;
+          line = msg;
         } else {
-          return `${msg.timestamp || ''} ${msg.level || ''} ${msg.category || ''} ${msg.message || ''}${msg.details || ''}`;
+          // Сохраняем все поля сообщения
+          line = `${msg.timestamp || ''} ${msg.level || ''} ${msg.category || ''} ${msg.message || ''}${msg.details || ''}`;
+          if (msg.event) line += ` | event=${msg.event}`;
+          if (msg.error) line += ` | error=${msg.error}`;
         }
+        
+        // Логируем первые и последние 5 сообщений для диагностики
+        if (index < 5 || index >= messages.length - 5) {
+          console.log(`[DEBUG] Message ${index + 1}/${messages.length}: ${line.substring(0, 100)}...`);
+        }
+        
+        return line;
       }).join('\n');
+      
+      console.log(`[DEBUG] Final debugContent size: ${debugContent.length} characters`);
       
       const response = await fetch(`http://${window.location.hostname}:8080/api/debug/save`, {
         method: 'POST',
