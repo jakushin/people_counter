@@ -1775,12 +1775,23 @@ func findWindow() (string, int, int, error) {
 		}
 	}
 	
-	// Окно не найдено - UxPlay монитор обработает это
-	
+	// Окно не найдено - запускаем детальную диагностику
 	log.Printf("[ERROR] All priorities failed! No suitable UxPlay window found in %d total windows (potentialVideos: %d)", windowCount, len(potentialVideoWindows))
+	
+	// Запускаем диагностику при первой неудачной попытке найти окно
+	static_diagnostic_counter++
+	if static_diagnostic_counter == 1 {
+		log.Printf("[UXPLAY_DIAG] Первая неудачная попытка - запускаем детальную диагностику UxPlay...")
+		go diagnoseUxPlayContainer() // Запускаем в горутине чтобы не блокировать
+	} else if static_diagnostic_counter%50 == 0 {
+		log.Printf("[UXPLAY_DIAG] Попытка %d - повторная диагностика UxPlay...", static_diagnostic_counter)
+		go diagnoseUxPlayContainer()
+	}
+	
 	debugError("AIRPLAY", "window_not_found", "All priorities failed! No suitable UxPlay window found", map[string]interface{}{
 		"totalWindows": windowCount,
 		"potentialVideoWindows": len(potentialVideoWindows),
+		"diagnosticAttempt": static_diagnostic_counter,
 	})
 	return "", 0, 0, nil
 }
@@ -2124,6 +2135,10 @@ func airplayDiagnosticsHandler(w http.ResponseWriter, r *http.Request) {
 	
 	processes := getUxPlayProcesses()
 	
+	// Запускаем детальную диагностику UxPlay контейнера при API вызове
+	log.Printf("[UXPLAY_DIAG] API запрос диагностики - запускаем полную проверку UxPlay контейнера...")
+	go diagnoseUxPlayContainer()
+	
 	diagnostics := map[string]interface{}{
 		"timestamp": time.Now(),
 		"current_state": state,
@@ -2133,6 +2148,7 @@ func airplayDiagnosticsHandler(w http.ResponseWriter, r *http.Request) {
 			"uptime": time.Since(startTime),
 			"goroutines": runtime.NumGoroutine(),
 		},
+		"uxplay_detailed_diagnostics": "Запущена детальная диагностика UxPlay контейнера - проверьте логи backend",
 	}
 	
 	w.Header().Set("Content-Type", "application/json")
@@ -3344,6 +3360,7 @@ var (
 	uxplayMonitorMutex sync.Mutex
 	connectedClients = make(map[*websocket.Conn]bool)
 	clientsMutex sync.Mutex
+	static_diagnostic_counter = 0
 )
 
 // Функция для регистрации WebSocket клиентов
@@ -3395,11 +3412,27 @@ func startUxPlayMonitor() {
 	for {
 		time.Sleep(3 * time.Second) // Проверяем каждые 3 секунды
 		
+		// Логируем что монитор работает каждые 20 циклов (1 минута)
+		static monitorCycle int
+		monitorCycle++
+		if monitorCycle%20 == 0 {
+			log.Printf("[UXPLAY_MONITOR] Monitor is running (cycle %d), connected clients: %d", monitorCycle, len(connectedClients))
+		}
+		
 		uxplayMonitorMutex.Lock()
 		
 		// Проверяем текущий статус UxPlay окна
 		windowID, width, height, err := findWindow()
 		currentWindowFound := (err == nil && windowID != "")
+		
+		// Логируем попытки поиска каждые 10 циклов (30 секунд)
+		if monitorCycle%10 == 0 {
+			if currentWindowFound {
+				log.Printf("[UXPLAY_MONITOR] Window search SUCCESS: %s (%dx%d)", windowID, width, height)
+			} else {
+				log.Printf("[UXPLAY_MONITOR] Window search FAILED: %v", err)
+			}
+		}
 		
 		// Проверяем изменился ли статус
 		statusChanged := (currentWindowFound != lastUxPlayWindowStatus) || 
@@ -3428,5 +3461,113 @@ func startUxPlayMonitor() {
 		}
 		
 		uxplayMonitorMutex.Unlock()
+	}
+}
+
+// Детальная диагностика UxPlay контейнера
+func diagnoseUxPlayContainer() {
+	log.Printf("[UXPLAY_DIAG] === ПОЛНАЯ ДИАГНОСТИКА UXPLAY КОНТЕЙНЕРА ===")
+	
+	// 1. Проверим что контейнер работает
+	statusCmd := exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
+	statusOut, err := statusCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[UXPLAY_DIAG] ERROR: Cannot access airplay container: %v", err)
+		log.Printf("[UXPLAY_DIAG] Output: %s", string(statusOut))
+		return
+	}
+	
+	log.Printf("[UXPLAY_DIAG] === ПРОЦЕССЫ В AIRPLAY КОНТЕЙНЕРЕ ===")
+	lines := strings.Split(string(statusOut), "\n")
+	for i, line := range lines {
+		if i < 20 && line != "" { // Показываем первые 20 строк
+			log.Printf("[UXPLAY_DIAG] %s", line)
+		}
+	}
+	
+	// 2. Проверим UxPlay процессы специально
+	uxplayCmd := exec.Command("docker", "exec", "appletv-airplay-1", "pgrep", "-f", "uxplay")
+	uxplayOut, uxplayErr := uxplayCmd.CombinedOutput()
+	if uxplayErr != nil {
+		log.Printf("[UXPLAY_DIAG] ERROR: UxPlay process not found: %v", uxplayErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] UxPlay process IDs: %s", strings.TrimSpace(string(uxplayOut)))
+	}
+	
+	// 3. Проверим логи UxPlay
+	logCmd := exec.Command("docker", "exec", "appletv-airplay-1", "tail", "-20", "/tmp/uxplay.log")
+	logOut, logErr := logCmd.CombinedOutput()
+	if logErr != nil {
+		log.Printf("[UXPLAY_DIAG] Cannot read UxPlay logs: %v", logErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] === ПОСЛЕДНИЕ 20 СТРОК UXPLAY ЛОГОВ ===")
+		logLines := strings.Split(string(logOut), "\n")
+		for _, line := range logLines {
+			if line != "" {
+				log.Printf("[UXPLAY_DIAG] %s", line)
+			}
+		}
+	}
+	
+	// 4. Проверим Xvfb процесс
+	xvfbCmd := exec.Command("docker", "exec", "appletv-airplay-1", "pgrep", "-f", "Xvfb")
+	xvfbOut, xvfbErr := xvfbCmd.CombinedOutput()
+	if xvfbErr != nil {
+		log.Printf("[UXPLAY_DIAG] ERROR: Xvfb process not found: %v", xvfbErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] Xvfb process ID: %s", strings.TrimSpace(string(xvfbOut)))
+	}
+	
+	// 5. Проверим X11 display
+	displayCmd := exec.Command("docker", "exec", "appletv-airplay-1", "bash", "-c", "DISPLAY=:0 xset q")
+	displayOut, displayErr := displayCmd.CombinedOutput()
+	if displayErr != nil {
+		log.Printf("[UXPLAY_DIAG] ERROR: X11 display :0 not accessible: %v", displayErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] X11 display :0 is accessible")
+	}
+	
+	// 6. Проверим размер виртуального экрана
+	screenCmd := exec.Command("docker", "exec", "appletv-airplay-1", "bash", "-c", "DISPLAY=:0 xdpyinfo | grep dimensions")
+	screenOut, screenErr := screenCmd.CombinedOutput()
+	if screenErr != nil {
+		log.Printf("[UXPLAY_DIAG] Cannot get screen info: %v", screenErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] Screen info: %s", strings.TrimSpace(string(screenOut)))
+	}
+	
+	// 7. Попытаемся получить более детальную информацию об окнах
+	detailCmd := exec.Command("docker", "exec", "appletv-airplay-1", "bash", "-c", "DISPLAY=:0 xwininfo -root -tree | head -50")
+	detailOut, detailErr := detailCmd.CombinedOutput()
+	if detailErr != nil {
+		log.Printf("[UXPLAY_DIAG] Cannot get detailed window info: %v", detailErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] === ДЕТАЛЬНАЯ ИНФОРМАЦИЯ ОБ ОКНАХ ===")
+		log.Printf("[UXPLAY_DIAG] %s", string(detailOut))
+	}
+	
+	// 8. Проверим сетевые подключения UxPlay
+	netstatCmd := exec.Command("docker", "exec", "appletv-airplay-1", "netstat", "-tlnp")
+	netstatOut, netstatErr := netstatCmd.CombinedOutput()
+	if netstatErr != nil {
+		log.Printf("[UXPLAY_DIAG] Cannot get network info: %v", netstatErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] === СЕТЕВЫЕ ПОДКЛЮЧЕНИЯ UXPLAY ===")
+		lines := strings.Split(string(netstatOut), "\n")
+		for _, line := range lines {
+			if strings.Contains(line, ":") && (strings.Contains(line, "LISTEN") || strings.Contains(line, "uxplay")) {
+				log.Printf("[UXPLAY_DIAG] %s", line)
+			}
+		}
+	}
+	
+	// 9. Проверим переменные окружения UxPlay
+	envCmd := exec.Command("docker", "exec", "appletv-airplay-1", "bash", "-c", "ps -eo pid,cmd | grep uxplay | grep -v grep")
+	envOut, envErr := envCmd.CombinedOutput()
+	if envErr != nil {
+		log.Printf("[UXPLAY_DIAG] Cannot get UxPlay command line: %v", envErr)
+	} else {
+		log.Printf("[UXPLAY_DIAG] === КОМАНДА ЗАПУСКА UXPLAY ===")
+		log.Printf("[UXPLAY_DIAG] %s", strings.TrimSpace(string(envOut)))
 	}
 }
