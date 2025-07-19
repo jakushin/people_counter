@@ -222,7 +222,7 @@ else
   
   # Устанавливаем переменные окружения для текущего процесса
   env DISPLAY=:0 XAUTHORITY=/root/.Xauthority XDG_RUNTIME_DIR=/tmp/runtime-root \
-    uxplay -d -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
+    uxplay -vs $VIDEO_SINK -s 1920x1080 -n "AppleTV (Backend)" >> "$UXPLAY_LOG" 2>&1 &
   UXPLAY_PID=$!
   
   # Ждем дольше для запуска UxPlay и мониторим окна
