@@ -136,7 +136,8 @@ export default function DebugPanel() {
         setMessages(prev => [...prev, saveMessage]);
         logUserAction('Save Debug Log', `SUCCESS: File saved as ${result.file}`);
       } else {
-        throw new Error('Failed to save debug log');
+        const errorText = await response.text();
+        throw new Error(`Server error: ${response.status} - ${errorText}`);
       }
     } catch (err) {
       console.error('Failed to save debug log:', err);

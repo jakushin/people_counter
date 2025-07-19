@@ -29,7 +29,21 @@ export default function WebRTCStream() {
   const pendingIceCandidates = useRef([]); // Очередь для ICE candidates
   const autoReconnectTimeoutRef = useRef(null); // Таймер автопереподключения
 
+  // Critical diagnostic: Monitor isConnecting state changes
+  useEffect(() => {
+    console.log(`📊 STATE CHANGE - isConnecting changed to: ${isConnecting}`);
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('State Change', `isConnecting changed to: ${isConnecting}`);
+    }
+  }, [isConnecting]);
 
+  // Critical diagnostic: Monitor status state changes  
+  useEffect(() => {
+    console.log(`📊 STATE CHANGE - status changed to: ${status}`);
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('State Change', `status changed to: ${status}`);
+    }
+  }, [status]);
 
   // Функция автопереподключения с обратным отсчетом
   const startAutoReconnectCountdown = () => {
@@ -235,13 +249,19 @@ export default function WebRTCStream() {
 
   // Функция запуска WebRTC соединения
   const startWebRTC = async () => {
-    if (isConnecting) return;
+    console.log(`🚀 START WEBRTC CALLED - isConnecting: ${isConnecting}, status: ${status}`);
+    
+    if (isConnecting) {
+      console.log(`🚫 START WEBRTC BLOCKED - isConnecting is already true, returning early`);
+      return;
+    }
     
     // Log user action
     if (window.debugLogUserAction) {
       window.debugLogUserAction('Start WebRTC', `Current status: ${status}`);
     }
     
+    console.log(`🚀 START WEBRTC PROCEEDING - setting isConnecting=true, status=connecting`);
     setIsConnecting(true);
     setStatusWithLog('connecting');
     setError(null);
@@ -249,8 +269,31 @@ export default function WebRTCStream() {
     try {
       // Создаем WebSocket соединение
       const wsUrl = `ws://${window.location.host}/api/webrtc/signal`;
+      console.log(`🔌 CREATING WEBSOCKET - URL: ${wsUrl}`);
+      
+      // Cleanup any existing WebSocket before creating new one
+      if (wsRef.current) {
+        console.log(`🧹 CLEANUP - Closing existing WebSocket (readyState: ${wsRef.current.readyState})`);
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      
       const websocket = new WebSocket(wsUrl);
       wsRef.current = websocket;
+      console.log(`🔌 WEBSOCKET CREATED - readyState: ${websocket.readyState}`);
+      
+      // Monitor WebSocket state changes
+      websocket.addEventListener('open', () => {
+        console.log(`✅ WEBSOCKET OPENED - readyState: ${websocket.readyState}`);
+      });
+      
+      websocket.addEventListener('close', (event) => {
+        console.log(`❌ WEBSOCKET CLOSED - code: ${event.code}, reason: ${event.reason}, readyState: ${websocket.readyState}`);
+      });
+      
+      websocket.addEventListener('error', (event) => {
+        console.log(`🚨 WEBSOCKET ERROR - readyState: ${websocket.readyState}, error:`, event);
+      });
 
       // Простая конфигурация для host network режима
       const config = {
@@ -354,7 +397,8 @@ export default function WebRTCStream() {
 
       // WebSocket обработчики
       websocket.onopen = async () => {
-        console.log('WebRTC Debug: WebSocket connected to server');
+        console.log('🎯 WEBSOCKET ONOPEN TRIGGERED - WebSocket connected to server');
+        console.log(`🎯 WEBSOCKET STATE - readyState: ${websocket.readyState}, url: ${websocket.url}`);
         
         // Создаем SDP offer
         try {
@@ -607,7 +651,9 @@ export default function WebRTCStream() {
       };
 
     } catch (err) {
-      console.error('Failed to start WebRTC:', err);
+      console.error('💥 FAILED TO START WEBRTC - Error:', err);
+      console.log(`💥 ERROR DETAILS - message: ${err.message}, stack: ${err.stack}`);
+      console.log(`💥 SETTING STATE - isConnecting=false, status=failed`);
       setError('Failed to start WebRTC: ' + err.message);
       setStatusWithLog('failed');
       setIsConnecting(false);
@@ -626,8 +672,10 @@ export default function WebRTCStream() {
     // Отменяем автопереподключение если активно
     cancelAutoReconnect();
     
+    console.log(`🛑 STOP WEBRTC - Current state: isConnecting=${isConnecting}, status=${status}`);
     setIsConnecting(false);
     setStatusWithLog('stopped');
+    console.log(`🛑 STOP WEBRTC - Set isConnecting=false, status=stopped`);
     setError(null);
     setServerStatus(null); // Очищаем статус сервера
     setConnectionState('new');
@@ -713,7 +761,13 @@ export default function WebRTCStream() {
       {/* Кнопки управления WebRTC */}
       <div style={{margin:'16px 0', display:'flex', gap:'12px', alignItems:'center'}}>
         <button 
-          onClick={startWebRTC}
+          onClick={() => {
+            console.log(`🖱️ START BUTTON CLICKED - isConnecting: ${isConnecting}, status: ${status}, autoReconnectCountdown: ${autoReconnectCountdown}`);
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('Start Button Clicked', `isConnecting: ${isConnecting}, status: ${status}`);
+            }
+            startWebRTC();
+          }}
           disabled={isConnecting || autoReconnectCountdown !== null}
           style={{
             padding:'8px 16px',
@@ -747,7 +801,13 @@ export default function WebRTCStream() {
         )}
         
         <button 
-          onClick={stopWebRTC}
+          onClick={() => {
+            console.log(`🖱️ STOP BUTTON CLICKED - isConnecting: ${isConnecting}, status: ${status}`);
+            if (window.debugLogUserAction) {
+              window.debugLogUserAction('Stop Button Clicked', `isConnecting: ${isConnecting}, status: ${status}`);
+            }
+            stopWebRTC();
+          }}
           disabled={!isConnecting && status === 'stopped'}
           style={{
             padding:'8px 16px',
