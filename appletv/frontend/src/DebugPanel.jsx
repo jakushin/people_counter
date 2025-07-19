@@ -126,7 +126,7 @@ export default function DebugPanel() {
         const result = await response.json();
         // Add a system message to show save success
         const saveMessage = {
-          timestamp: new Date(),
+          timestamp: new Date().toISOString(),
           level: 'SUCCESS',
           category: 'DEBUG',
           event: 'log_saved',
