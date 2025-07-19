@@ -1241,9 +1241,6 @@ func main() {
 			return !excluded
 		})
 		
-		// ЛОКАЛЬНАЯ СЕТЬ: Принудительно используем только host candidates
-		settingEngine.SetICECandidateTypes([]webrtc.ICECandidateType{webrtc.ICECandidateTypeHost})
-		
 		log.Printf("[DEBUG] WebRTC: Configured SettingEngine for LOCAL NETWORK (no NAT/firewall)")
 		
 		// Автоматически определяем IP хоста для прямого host-to-host соединения
