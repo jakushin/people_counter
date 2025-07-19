@@ -760,19 +760,7 @@ export default function WebRTCStream() {
         >
           Stop
         </button>
-        <button 
-          onClick={() => setDebugInfo([])}
-          style={{
-            padding:'8px 16px',
-            backgroundColor: '#6c757d',
-            color: 'white',
-            border: 'none',
-            borderRadius:'4px',
-            cursor: 'pointer'
-          }}
-        >
-          Clear Debug
-        </button>
+
       </div>
 
       <div style={{margin:'24px 0'}}>
@@ -834,32 +822,6 @@ export default function WebRTCStream() {
           />
         </div>
       </div>
-      
-      <div style={{margin:'24px 0'}}>
-        <div style={{marginBottom: '8px'}}>
-          <strong>WebRTC Status:</strong> <span style={{color: status === 'connected' ? 'green' : status === 'failed' ? 'red' : 'orange'}}>{status}</span>
-        </div>
-        
-        {serverStatus && (
-          <div style={{marginBottom: '8px', padding: '8px', backgroundColor: '#f8f9fa', border: '1px solid #dee2e6', borderRadius: '4px'}}>
-            <strong>Server Status:</strong> <span style={{color: '#007bff'}}>{serverStatus}</span>
-          </div>
-        )}
-        
-        <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', fontSize: '14px', color: '#666'}}>
-          <div>
-            <strong>Connection:</strong> {connectionState}
-          </div>
-          <div>
-            <strong>ICE Connection:</strong> {iceConnectionState}
-          </div>
-          <div>
-            <strong>ICE Gathering:</strong> {iceGatheringState}
-          </div>
-        </div>
-      </div>
-      
-      {error && <div style={{color:'red', marginBottom: '16px', padding: '8px', backgroundColor: '#ffe6e6', border: '1px solid #ffcccc', borderRadius: '4px'}}>{error}</div>}
       
       {/* Debug Panel */}
       <DebugPanel />
