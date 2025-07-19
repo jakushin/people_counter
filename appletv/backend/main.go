@@ -503,9 +503,8 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 	// Дополнительная диагностика перед запуском
 	log.Printf("[DEBUG] WebRTC: Pre-capture diagnostics for window %s", windowID)
 	
-	// Проверяем что окно еще существует локально
-	checkCmd := exec.Command("xwininfo", "-id", windowID)
-	checkCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
+	// Проверяем что окно еще существует в airplay контейнере
+	checkCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
 	checkOut, checkErr := checkCmd.Output()
 	if checkErr != nil {
 		log.Printf("[ERROR] Window %s no longer exists: %v", windowID, checkErr)
@@ -1535,11 +1534,11 @@ func findWindow() (string, int, int, error) {
 		return "", 0, 0, displayErr
 	}
 	
-	winInfoCmd := exec.Command("xwininfo", "-root", "-tree")
-	winInfoCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
+	// Execute xwininfo in the airplay container where UxPlay creates windows
+	winInfoCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
 	winInfoOut, err := winInfoCmd.Output()
 	if err != nil {
-		log.Printf("[ERROR] xwininfo failed: %v", err)
+		log.Printf("[ERROR] xwininfo failed in airplay container: %v", err)
 		return "", 0, 0, err
 	}
 	
@@ -1768,9 +1767,8 @@ func getWindowInfo(windowId string) {
 		return
 	}
 	
-	// Получаем подробную информацию об окне локально
-	winCmd := exec.Command("xwininfo", "-id", windowId)
-	winCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
+	// Получаем подробную информацию об окне в airplay контейнере
+	winCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowId, "-display", ":0")
 	winOut, winErr := winCmd.Output()
 	if winErr != nil {
 		log.Printf("[DEBUG] Error getting window info for %s: %v", windowId, winErr)
@@ -1787,9 +1785,8 @@ func getWindowInfo(windowId string) {
 		}
 	}
 	
-	// Также проверяем имя окна локально
-	nameCmd := exec.Command("xwininfo", "-id", windowId, "-name")
-	nameCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
+	// Также проверяем имя окна в airplay контейнере
+	nameCmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowId, "-name", "-display", ":0")
 	nameOut, nameErr := nameCmd.Output()
 	if nameErr == nil {
 		log.Printf("[DEBUG] Window %s name: %s", windowId, strings.TrimSpace(string(nameOut)))
@@ -2399,9 +2396,8 @@ func getUxPlayWindows() []WindowInfo {
 		}
 	}
 	
-	// Выполняем команду xwininfo локально в backend контейнере
-	cmd := exec.Command("xwininfo", "-root", "-tree")
-	cmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
+	// Выполняем команду xwininfo в airplay контейнере где работает UxPlay
+	cmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-root", "-tree", "-display", ":0")
 	output, err := cmd.Output()
 	if err != nil {
 		log.Printf("ERROR: Failed to run xwininfo: %v", err)
@@ -2479,8 +2475,8 @@ func getUxPlayWindows() []WindowInfo {
 	if len(windows) == 0 {
 		log.Printf("No windows found! Attempting additional diagnostics...")
 		
-		// Пытаемся использовать wmctrl как альтернативу
-		cmd := exec.Command("wmctrl", "-l")
+		// Пытаемся использовать wmctrl как альтернативу в airplay контейнере
+		cmd := exec.Command("docker", "exec", "airplay-1", "wmctrl", "-l")
 		if output, err := cmd.Output(); err == nil {
 			log.Printf("wmctrl output: %s", string(output))
 		} else {
@@ -3290,8 +3286,7 @@ func startRTPListeners(session *WebRTCSession) error {
 
 // Get window dimensions for existing window
 func getWindowDimensions(windowID string) (int, int, error) {
-	cmd := exec.Command("xwininfo", "-id", windowID)
-	cmd.Env = append(os.Environ(), "DISPLAY=:0")
+	cmd := exec.Command("docker", "exec", "airplay-1", "xwininfo", "-id", windowID, "-display", ":0")
 	output, err := cmd.Output()
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to get window info: %v", err)
