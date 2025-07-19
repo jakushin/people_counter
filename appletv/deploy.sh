@@ -103,7 +103,8 @@ docker compose down
 #docker volume prune -f
 
 echo "Rebuilding and starting containers..."
-docker compose build --no-cache
+#docker compose build --no-cache
+docker compose build
 docker compose up -d
 
 echo "Done! If you changed group membership, please log out and log in again." 
