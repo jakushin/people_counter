@@ -638,7 +638,40 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 		"processID": cmd.Process.Pid,
 	})
 	
+	// Запускаем мониторинг FFmpeg процесса
+	go monitorFFmpegProcess(cmd, windowID, videoPort)
+	
 	return cmd, nil
+}
+
+// Функция мониторинга FFmpeg процесса
+func monitorFFmpegProcess(cmd *exec.Cmd, windowID string, videoPort int) {
+	log.Printf("[FFMPEG_MONITOR] Starting monitoring for process PID %d", cmd.Process.Pid)
+	
+	// Ждем завершения процесса
+	err := cmd.Wait()
+	
+	if err != nil {
+		log.Printf("[FFMPEG_MONITOR] CRITICAL: FFmpeg process PID %d CRASHED! Error: %v", cmd.Process.Pid, err)
+		debugError("FFMPEG", "crashed", "FFmpeg process crashed unexpectedly", map[string]interface{}{
+			"processID": cmd.Process.Pid,
+			"windowID": windowID,
+			"videoPort": videoPort,
+			"error": err.Error(),
+		})
+		
+		// Получаем stderr если доступен
+		if cmd.Stderr != nil {
+			log.Printf("[FFMPEG_MONITOR] Checking FFmpeg stderr output...")
+		}
+	} else {
+		log.Printf("[FFMPEG_MONITOR] FFmpeg process PID %d terminated normally", cmd.Process.Pid)
+		debugInfo("FFMPEG", "terminated", "FFmpeg process terminated normally", map[string]interface{}{
+			"processID": cmd.Process.Pid,
+			"windowID": windowID,
+			"videoPort": videoPort,
+		})
+	}
 }
 
 // Функция для диагностики DISPLAY окружения
@@ -1149,6 +1182,9 @@ func main() {
 		
 		log.Printf("[INFO] *** PEERCONNECTION CREATED SUCCESSFULLY *** for session %s", currentSessionID)
 		
+		// Запускаем таймер соединения для диагностики
+		connectionStartTime := time.Now()
+		
 		// Создаем новую WebRTC сессию (moved up to avoid goto issues)
 		sessionCtx, sessionCancel := context.WithCancel(context.Background())
 		sessionID := fmt.Sprintf("session_%d", time.Now().Unix())
@@ -1209,8 +1245,14 @@ func main() {
 				debugWarning("WEBRTC", "ice_state_disconnected", "ICE connection disconnected", details)
 				cleanupWebRTCSession()
 			case webrtc.ICEConnectionStateClosed:
-				log.Printf("[INFO] WebRTC: ICE connection closed")
-				debugInfo("WEBRTC", "ice_state_closed", "ICE connection closed", details)
+				connectionDuration := time.Since(connectionStartTime)
+				log.Printf("[CRITICAL] WebRTC: ICE connection closed after %.2f seconds", connectionDuration.Seconds())
+				debugInfo("WEBRTC", "ice_state_closed", "ICE connection closed", map[string]interface{}{
+					"sessionID": sessionID,
+					"iceState": state.String(),
+					"connectionDuration": connectionDuration.Seconds(),
+					"wasConnected": connectionDuration > time.Second, // Если соединение было больше секунды, значит работало
+				})
 				cleanupWebRTCSession()
 			}
 		})
@@ -3012,6 +3054,9 @@ func initializeWebRTCSession(peerConnection *webrtc.PeerConnection, windowID str
 	// Start video packet forwarding goroutine
 	go func() {
 		log.Printf("[DEBUG] WebRTC: Starting video packet forwarding goroutine")
+		debugInfo("RTP", "video_forwarding_started", "Starting video packet forwarding", map[string]interface{}{
+			"videoPort": videoPort,
+		})
 		buffer := make([]byte, 65536)
 		var packetsRead, packetsSent int64
 		var lastLog time.Time
@@ -3038,11 +3083,30 @@ func initializeWebRTCSession(peerConnection *webrtc.PeerConnection, windowID str
 					var rtpPacket rtp.Packet
 					if err := rtpPacket.Unmarshal(buffer[:n]); err != nil {
 						log.Printf("[ERROR] Failed to unmarshal RTP packet: %v", err)
+						debugError("RTP", "unmarshal_failed", "Failed to unmarshal RTP packet", map[string]interface{}{
+							"error": err.Error(),
+							"packetSize": n,
+						})
 						continue
+					}
+					
+					// Диагностика первых пакетов
+					if packetsRead <= 5 {
+						log.Printf("[RTP_MONITOR] Video packet #%d: size=%d bytes, timestamp=%d, seqNum=%d", packetsRead, len(rtpPacket.Payload), rtpPacket.Timestamp, rtpPacket.SequenceNumber)
+						debugInfo("RTP", "first_packets", "First video packets received", map[string]interface{}{
+							"packetNumber": packetsRead,
+							"payloadSize": len(rtpPacket.Payload),
+							"timestamp": rtpPacket.Timestamp,
+							"sequenceNumber": rtpPacket.SequenceNumber,
+						})
 					}
 					
 					if err := videoTrack.WriteRTP(&rtpPacket); err != nil {
 						log.Printf("[ERROR] Failed to write video RTP packet: %v", err)
+						debugError("RTP", "webrtc_write_failed", "Failed to write RTP packet to WebRTC", map[string]interface{}{
+							"error": err.Error(),
+							"packetNumber": packetsRead,
+						})
 					} else {
 						packetsSent++
 					}
