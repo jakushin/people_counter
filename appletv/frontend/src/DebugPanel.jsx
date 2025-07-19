@@ -115,11 +115,24 @@ export default function DebugPanel() {
     logUserAction('Save Debug Log', 'Attempting to save debug.txt');
     setIsSaving(true);
     try {
+      // Подготавливаем все сообщения из UI для сохранения
+      const debugContent = messages.map(msg => {
+        if (typeof msg === 'string') {
+          return msg;
+        } else {
+          return `${msg.timestamp || ''} ${msg.level || ''} ${msg.category || ''} ${msg.message || ''}${msg.details || ''}`;
+        }
+      }).join('\n');
+      
       const response = await fetch(`http://${window.location.hostname}:8080/api/debug/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          debugContent: debugContent,
+          includeUIMessages: true
+        }),
       });
 
       if (response.ok) {

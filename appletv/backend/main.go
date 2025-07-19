@@ -2253,22 +2253,67 @@ func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
-	err := debugLogger.SaveToFile()
-	if err != nil {
-		debugError("DEBUG", "save_failed", "Failed to save debug log to file", map[string]interface{}{
-			"error": err.Error(),
-		})
-		http.Error(w, fmt.Sprintf("Failed to save debug log: %v", err), http.StatusInternalServerError)
-		return
+	// Проверяем есть ли контент из UI
+	var requestBody struct {
+		DebugContent      string `json:"debugContent"`
+		IncludeUIMessages bool   `json:"includeUIMessages"`
 	}
 	
-	debugSuccess("DEBUG", "save_success", "Debug log saved to /var/log/appletv/debug.txt")
+	var filename string
+	
+	if r.ContentLength > 0 {
+		// Читаем тело запроса если есть
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err == nil && requestBody.IncludeUIMessages {
+			// Сохраняем контент из UI
+			timestamp := time.Now().Format("2006-01-02_15-04-05")
+			filename = fmt.Sprintf("/var/log/appletv/debug_%s.txt", timestamp)
+			
+			// Добавляем заголовок с временной меткой
+			content := fmt.Sprintf("=== DEBUG LOG SAVED AT %s ===\n\n%s", 
+				time.Now().Format("2006-01-02 15:04:05"), requestBody.DebugContent)
+			
+			if err := os.WriteFile(filename, []byte(content), 0644); err != nil {
+				debugError("DEBUG", "save_failed", "Failed to save UI debug log to file", map[string]interface{}{
+					"error": err.Error(),
+					"filename": filename,
+				})
+				http.Error(w, fmt.Sprintf("Failed to save debug log: %v", err), http.StatusInternalServerError)
+				return
+			}
+			
+			debugSuccess("DEBUG", "save_success", fmt.Sprintf("UI Debug log saved to %s", filename))
+		} else {
+			// Используем стандартное сохранение backend логов
+			err := debugLogger.SaveToFile()
+			if err != nil {
+				debugError("DEBUG", "save_failed", "Failed to save debug log to file", map[string]interface{}{
+					"error": err.Error(),
+				})
+				http.Error(w, fmt.Sprintf("Failed to save debug log: %v", err), http.StatusInternalServerError)
+				return
+			}
+			filename = "/var/log/appletv/debug.txt"
+			debugSuccess("DEBUG", "save_success", "Backend debug log saved to /var/log/appletv/debug.txt")
+		}
+	} else {
+		// Используем стандартное сохранение backend логов
+		err := debugLogger.SaveToFile()
+		if err != nil {
+			debugError("DEBUG", "save_failed", "Failed to save debug log to file", map[string]interface{}{
+				"error": err.Error(),
+			})
+			http.Error(w, fmt.Sprintf("Failed to save debug log: %v", err), http.StatusInternalServerError)
+			return
+		}
+		filename = "/var/log/appletv/debug.txt"
+		debugSuccess("DEBUG", "save_success", "Backend debug log saved to /var/log/appletv/debug.txt")
+	}
 	
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "success",
-		"message": "Debug log saved to debug.txt",
-		"file": "/var/log/appletv/debug.txt",
+		"message": "Debug log saved",
+		"file": filename,
 		"timestamp": time.Now(),
 	})
 }

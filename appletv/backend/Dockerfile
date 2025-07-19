@@ -37,7 +37,13 @@ RUN apk update && apk upgrade && \
     xset \
     xdpyinfo \
     docker-cli \
+    tzdata \
     && rm -rf /var/cache/apk/*
+
+# Устанавливаем timezone Belgrade
+ENV TZ=Europe/Belgrade
+RUN ln -sf /usr/share/zoneinfo/Europe/Belgrade /etc/localtime
+RUN echo "Europe/Belgrade" > /etc/timezone
 
 WORKDIR /root/
 

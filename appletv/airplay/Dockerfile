@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     htop \
     net-tools \
     avahi-utils \
+    tzdata \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
@@ -51,6 +52,11 @@ RUN apt-get update && apt-get install -y \
     libegl1-mesa-dev \
     mesa-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем timezone Belgrade  
+ENV TZ=Europe/Belgrade
+RUN ln -snf /usr/share/zoneinfo/Europe/Belgrade /etc/localtime && echo "Europe/Belgrade" > /etc/timezone
+RUN dpkg-reconfigure -f noninteractive tzdata
 
 COPY start.sh /start.sh
 RUN chmod +x /start.sh
