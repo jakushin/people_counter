@@ -3520,7 +3520,7 @@ func diagnoseUxPlayContainer() {
 	
 	// 5. Проверим X11 display
 	displayCmd := exec.Command("docker", "exec", "appletv-airplay-1", "bash", "-c", "DISPLAY=:0 xset q")
-	displayOut, displayErr := displayCmd.CombinedOutput()
+	_, displayErr := displayCmd.CombinedOutput()
 	if displayErr != nil {
 		log.Printf("[UXPLAY_DIAG] ERROR: X11 display :0 not accessible: %v", displayErr)
 	} else {
