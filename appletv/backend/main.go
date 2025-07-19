@@ -249,6 +249,80 @@ func safeWriteWebSocket(conn *websocket.Conn, message []byte) error {
 	return conn.WriteMessage(websocket.TextMessage, message)
 }
 
+// Get the host IP address for ICE candidates
+func getHostIPAddress() string {
+	// Try to get the default interface IP
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		log.Printf("[WARNING] Failed to determine host IP via connection test: %v", err)
+		
+		// Fallback: try to find a non-loopback interface
+		interfaces, err := net.Interfaces()
+		if err != nil {
+			log.Printf("[WARNING] Failed to get network interfaces: %v", err)
+			return "127.0.0.1" // Ultimate fallback
+		}
+		
+		for _, iface := range interfaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			
+			for _, addr := range addrs {
+				var ip net.IP
+				switch v := addr.(type) {
+				case *net.IPNet:
+					ip = v.IP
+				case *net.IPAddr:
+					ip = v.IP
+				}
+				
+				if ip != nil && ip.To4() != nil {
+					log.Printf("[INFO] Found host IP via interface %s: %s", iface.Name, ip.String())
+					return ip.String()
+				}
+			}
+		}
+		
+		return "127.0.0.1" // Ultimate fallback
+	}
+	defer conn.Close()
+	
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	ip := localAddr.IP.String()
+	log.Printf("[INFO] Determined host IP address: %s", ip)
+	return ip
+}
+
+// Check if WebSocket is alive and ready to send messages
+func isWebSocketAlive(conn *websocket.Conn) bool {
+	if conn == nil {
+		return false
+	}
+	
+	// Try to ping the WebSocket to check if it's alive
+	websocketWriteMutex.Lock()
+	defer websocketWriteMutex.Unlock()
+	
+	// Set short write deadline to quickly detect dead connections
+	conn.SetWriteDeadline(time.Now().Add(1 * time.Second))
+	defer conn.SetWriteDeadline(time.Time{}) // Reset deadline
+	
+	err := conn.WriteMessage(websocket.PingMessage, []byte("ping"))
+	if err != nil {
+		log.Printf("[WEBSOCKET] WebSocket ping failed - connection is dead: %v", err)
+		return false
+	}
+	
+	log.Printf("[WEBSOCKET] WebSocket ping successful - connection is alive")
+	return true
+}
+
 func findFreePort() (int, error) {
 	for i := 0; i < 100; i++ {
 		port := 5000 + rand.Intn(1000)
@@ -1116,9 +1190,9 @@ func main() {
 			}
 		}
 
-		// WebRTC configuration для host network режима (без STUN серверов) - moved up to avoid goto issues
+		// WebRTC configuration для локальной сети без NAT - только host candidates
 		config := webrtc.Configuration{
-			ICEServers:         []webrtc.ICEServer{}, // В host режиме STUN серверы не нужны
+			ICEServers:         []webrtc.ICEServer{}, // Локальная сеть без NAT - STUN не нужен
 			ICETransportPolicy: webrtc.ICETransportPolicyAll, // Разрешаем все типы транспорта
 		}
 		
@@ -1149,19 +1223,33 @@ func main() {
 		// Создаем SettingEngine для host network настроек
 		settingEngine := webrtc.SettingEngine{}
 		
-		// Настройки для лучшей работы в host network режиме
-		settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4, webrtc.NetworkTypeUDP6})
+		// Настройки для локальной сети - только UDP host candidates
+		settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 		
-		// Принудительно используем только WiFi интерфейс, исключаем Docker bridge
+		// Принудительно используем только реальные сетевые интерфейсы, исключаем Docker bridge
 		settingEngine.SetInterfaceFilter(func(interfaceName string) bool {
-			// Разрешаем только WiFi/Ethernet интерфейсы, исключаем Docker
-			return interfaceName != "docker0" && interfaceName != "br-" && !strings.HasPrefix(interfaceName, "veth")
+			// Разрешаем только WiFi/Ethernet интерфейсы, исключаем Docker и loopback
+			excluded := interfaceName == "docker0" || 
+						interfaceName == "lo" || 
+						interfaceName == "lo0" ||
+						strings.HasPrefix(interfaceName, "br-") || 
+						strings.HasPrefix(interfaceName, "veth")
+			
+			if !excluded {
+				log.Printf("[DEBUG] WebRTC: Allowing network interface: %s", interfaceName)
+			}
+			return !excluded
 		})
 		
-		log.Printf("[DEBUG] WebRTC: Configured SettingEngine for host network mode")
+		// ЛОКАЛЬНАЯ СЕТЬ: Принудительно используем только host candidates
+		settingEngine.SetICECandidateTypes([]webrtc.ICECandidateType{webrtc.ICECandidateTypeHost})
 		
-		// Настройка только для host candidates (без срефлексивных)
-		settingEngine.SetNAT1To1IPs([]string{"192.168.1.115"}, webrtc.ICECandidateTypeHost)
+		log.Printf("[DEBUG] WebRTC: Configured SettingEngine for LOCAL NETWORK (no NAT/firewall)")
+		
+		// Автоматически определяем IP хоста для прямого host-to-host соединения
+		hostIP := getHostIPAddress()
+		settingEngine.SetNAT1To1IPs([]string{hostIP}, webrtc.ICECandidateTypeHost)
+		log.Printf("[INFO] WebRTC: LOCAL NETWORK - Using direct host IP: %s (no STUN needed)", hostIP)
 		
 		// Создаем API с нашими настройками
 		api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithSettingEngine(settingEngine))
@@ -1173,7 +1261,8 @@ func main() {
 		}
 		sessionMutex.Unlock()
 		
-		log.Printf("[DEBUG] *** CREATING PEERCONNECTION *** for session %s in host network mode", currentSessionID)
+		log.Printf("[DEBUG] *** CREATING PEERCONNECTION *** for session %s in LOCAL NETWORK mode", currentSessionID)
+		log.Printf("[INFO] WebRTC: Optimized for local network - no NAT, no firewall, host candidates only")
 		peerConnection, err := api.NewPeerConnection(config)
 		if err != nil {
 			log.Printf("[ERROR] *** PEERCONNECTION CREATION FAILED *** %v", err)
@@ -1188,7 +1277,7 @@ func main() {
 			return
 		}
 		
-		log.Printf("[INFO] *** PEERCONNECTION CREATED SUCCESSFULLY *** for session %s", currentSessionID)
+		log.Printf("[INFO] *** PEERCONNECTION CREATED SUCCESSFULLY *** for session %s (LOCAL NETWORK OPTIMIZED)", currentSessionID)
 		
 		// Запускаем таймер соединения для диагностики
 		connectionStartTime := time.Now()
@@ -1238,9 +1327,33 @@ func main() {
 			case webrtc.ICEConnectionStateChecking:
 				log.Printf("[DEBUG] WebRTC: ICE connection is checking connectivity")
 				debugInfo("WEBRTC", "ice_state_checking", "ICE connection is checking connectivity", details)
+				
+				// LOCAL NETWORK: Более короткий timeout (10 секунд) так как нет NAT
+				go func() {
+					time.Sleep(10 * time.Second)
+					if peerConnection.ICEConnectionState() == webrtc.ICEConnectionStateChecking {
+						log.Printf("[ERROR] LOCAL NETWORK: ICE connection stuck in checking state for 10s, forcing restart")
+						debugError("WEBRTC", "ice_check_timeout", "ICE connection stuck in checking state", map[string]interface{}{
+							"timeout_seconds": 10,
+							"sessionID": sessionID,
+							"networkType": "local_network",
+						})
+						cleanupWebRTCSession()
+					}
+				}()
 			case webrtc.ICEConnectionStateConnected:
-				log.Printf("[SUCCESS] WebRTC: ICE connection established successfully!")
-				debugSuccess("WEBRTC", "ice_state_connected", "ICE connection established successfully!", details)
+				connectionDuration := time.Since(connectionStartTime)
+				log.Printf("[SUCCESS] 🎉 LOCAL NETWORK: ICE connection ESTABLISHED after %.2fs!", connectionDuration.Seconds())
+				log.Printf("[SUCCESS] 🎉 MEDIA READY: RTP packet forwarding will start NOW! Video should play immediately!")
+				log.Printf("[SUCCESS] 🎉 LOCAL NETWORK: Direct host-to-host media flow active! No NAT traversal needed!")
+				debugSuccess("WEBRTC", "ice_state_connected", "ICE connection established - media forwarding starting!", map[string]interface{}{
+					"sessionID": sessionID,
+					"connectionDuration": connectionDuration.Seconds(),
+					"timestamp": time.Now().Format(time.RFC3339),
+					"networkType": "local_network",
+					"candidates": "host_only",
+					"mediaForwarding": "starting_now",
+				})
 			case webrtc.ICEConnectionStateCompleted:
 				log.Printf("[SUCCESS] WebRTC: ICE connection completed successfully!")
 				debugSuccess("WEBRTC", "ice_state_completed", "ICE connection completed successfully!", details)
@@ -1314,16 +1427,24 @@ func main() {
 			log.Printf("[DEBUG] WebRTC: ICE Gathering State changed to: %s", state.String())
 		})
 		
-		// ICE candidate handling
+		// ICE candidate handling с принудительными host candidates
 		peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 			if candidate == nil {
 				log.Printf("[DEBUG] WebRTC: ICE gathering completed (nil candidate)")
 				debugInfo("WEBRTC", "ice_gathering_complete", "ICE gathering completed (nil candidate received)")
+				
+				// LOCAL NETWORK: Host candidates должны быть созданы автоматически
+				log.Printf("[INFO] WebRTC: LOCAL NETWORK - ICE gathering complete, using host candidates only")
 				return
 			}
 			log.Printf("[DEBUG] WebRTC: Generated ICE candidate: %s", candidate.String())
-			log.Printf("[DEBUG] WebRTC: ICE candidate details - Type: %s, Protocol: %s, Address: %s, Port: %d", 
+			log.Printf("[INFO] WebRTC: LOCAL NETWORK candidate - Type: %s, Protocol: %s, Address: %s, Port: %d", 
 				candidate.Typ.String(), candidate.Protocol.String(), candidate.Address, candidate.Port)
+			
+			// Проверяем что используется только host candidate
+			if candidate.Typ != webrtc.ICECandidateTypeHost {
+				log.Printf("[WARNING] WebRTC: Non-host candidate detected in local network: %s", candidate.Typ.String())
+			}
 			
 			debugInfo("WEBRTC", "ice_candidate_generated", "Generated ICE candidate", map[string]interface{}{
 				"type": candidate.Typ.String(),
@@ -2924,14 +3045,19 @@ func handleWindowDisappeared() {
 	if activeSession != nil {
 		log.Printf("[AUTO-RECONNECT] Preserving WebSocket and cleaning up WebRTC session due to window disappearance")
 		
-		// Сохраняем WebSocket для auto-reconnection
-		preservedWebSocket = activeSession.WebSocket
-		log.Printf("[AUTO-RECONNECT] WebSocket preserved for auto-reconnection")
+		// Check if WebSocket is alive before preserving it
+		if activeSession.WebSocket != nil && isWebSocketAlive(activeSession.WebSocket) {
+			preservedWebSocket = activeSession.WebSocket
+			log.Printf("[AUTO-RECONNECT] Live WebSocket preserved for auto-reconnection")
+		} else {
+			log.Printf("[AUTO-RECONNECT] WebSocket is dead or null, not preserving for auto-reconnection")
+			preservedWebSocket = nil
+		}
 		
 		// Полная очистка сессии
 		activeSession.Cleanup()
 		activeSession = nil
-		log.Printf("[AUTO-RECONNECT] Session cleaned up, WebSocket preserved separately")
+		log.Printf("[AUTO-RECONNECT] Session cleaned up, WebSocket checked and conditionally preserved")
 	}
 	
 	// Reset window ID tracking when iPhone disconnects
@@ -2977,12 +3103,24 @@ func handleWindowAppeared() {
 	// Use preserved WebSocket or active WebSocket for notification
 	var targetWebSocket *websocket.Conn
 	if preservedWebSocket != nil {
-		log.Printf("[AUTO-RECONNECT] Using preserved WebSocket for reconnection_ready notification")
-		targetWebSocket = preservedWebSocket
+		log.Printf("[AUTO-RECONNECT] Checking preserved WebSocket viability...")
+		if isWebSocketAlive(preservedWebSocket) {
+			log.Printf("[AUTO-RECONNECT] Using preserved WebSocket for reconnection_ready notification")
+			targetWebSocket = preservedWebSocket
+		} else {
+			log.Printf("[AUTO-RECONNECT] Preserved WebSocket is dead, discarding it")
+			preservedWebSocket = nil
+		}
 		preservedWebSocket = nil // Clear after use
 	} else if activeWebSocketConn != nil {
-		log.Printf("[AUTO-RECONNECT] Using active WebSocket for reconnection_ready notification")
-		targetWebSocket = activeWebSocketConn
+		log.Printf("[AUTO-RECONNECT] Checking active WebSocket viability...")
+		if isWebSocketAlive(activeWebSocketConn) {
+			log.Printf("[AUTO-RECONNECT] Using active WebSocket for reconnection_ready notification")
+			targetWebSocket = activeWebSocketConn
+		} else {
+			log.Printf("[AUTO-RECONNECT] Active WebSocket is dead, clearing reference")
+			activeWebSocketConn = nil
+		}
 	}
 	
 	// Check if WebRTC session is already active before sending reconnection notification
@@ -2995,19 +3133,18 @@ func handleWindowAppeared() {
 	}
 	
 	if targetWebSocket != nil {
-		log.Printf("[AUTO-RECONNECT] Sending immediate reconnection_ready notification")
+		log.Printf("[AUTO-RECONNECT] Sending immediate reconnection_ready notification via live WebSocket")
 		
-		// Use direct WebSocket write with mutex protection
-		websocketWriteMutex.Lock()
-		err := targetWebSocket.WriteMessage(websocket.TextMessage, []byte(`{
+		// Use safe WebSocket write function
+		err := safeWriteWebSocket(targetWebSocket, []byte(`{
 			"type": "reconnection_ready", 
 			"message": "iPhone reconnected - auto-reconnecting in 5 seconds",
 			"windowID": "`+lastWindowID+`"
 		}`))
-		websocketWriteMutex.Unlock()
 		
 		if err != nil {
 			log.Printf("[ERROR] Failed to send reconnection_ready: %v", err)
+			log.Printf("[AUTO-RECONNECT] WebSocket write failed, system ready for new connection")
 		} else {
 			log.Printf("[SUCCESS] reconnection_ready notification sent successfully")
 		}
@@ -3015,7 +3152,9 @@ func handleWindowAppeared() {
 		// DO NOT clear flags here - let WebSocket handler check them first
 		log.Printf("[AUTO-RECONNECT] Flags preserved for WebSocket handler to check")
 	} else {
-		log.Printf("[AUTO-RECONNECT] No WebSocket available, reconnection readiness saved for next connection")
+		log.Printf("[AUTO-RECONNECT] No live WebSocket available for reconnection_ready notification")
+		log.Printf("[AUTO-RECONNECT] Reconnection readiness saved for next WebSocket connection")
+		log.Printf("[AUTO-RECONNECT] Frontend should detect WebSocket loss and reconnect automatically")
 	}
 	
 	log.Printf("[AUTO-RECONNECT] System ready for new WebSocket connection from client")
@@ -3211,12 +3350,51 @@ func initializeWebRTCSession(peerConnection *webrtc.PeerConnection, windowID str
 	}
 	sessionMutex.Unlock()
 	
-	log.Printf("[INFO] WebRTC: Session initialized, starting packet forwarding")
+	log.Printf("[INFO] WebRTC: Session initialized, waiting for ICE connection before starting packet forwarding")
 	
-	// Start video packet forwarding goroutine
+	// Start video packet forwarding goroutine - WAIT for ICE connection!
 	go func() {
-		log.Printf("[DEBUG] WebRTC: Starting video packet forwarding goroutine")
-		debugInfo("RTP", "video_forwarding_started", "Starting video packet forwarding", map[string]interface{}{
+		log.Printf("[DEBUG] WebRTC: Video packet forwarding goroutine started, waiting for ICE connection...")
+		
+		// КРИТИЧНО: Ждем пока ICE connection не станет "connected"!
+		// Проверяем начальное состояние на случай race condition
+		iceState := peerConnection.ICEConnectionState()
+		if iceState == webrtc.ICEConnectionStateConnected {
+			log.Printf("[SUCCESS] 🎯 ICE ALREADY CONNECTED! Starting video packet forwarding immediately!")
+		} else {
+			log.Printf("[WAIT] 🕐 ICE state is %s, waiting for connected...", iceState.String())
+			startWait := time.Now()
+			for {
+				// Проверяем session context
+				select {
+				case <-sessionCtx.Done():
+					log.Printf("[DEBUG] WebRTC session cancelled while waiting for ICE connection")
+					return
+				default:
+				}
+				
+				iceState = peerConnection.ICEConnectionState()
+				if iceState == webrtc.ICEConnectionStateConnected {
+					waitDuration := time.Since(startWait)
+					log.Printf("[SUCCESS] 🎯 ICE CONNECTION READY after %.1fs! Starting video packet forwarding now!", waitDuration.Seconds())
+					break
+				} else if iceState == webrtc.ICEConnectionStateFailed || iceState == webrtc.ICEConnectionStateClosed {
+					log.Printf("[ERROR] ICE connection failed/closed before media forwarding started")
+					return
+				}
+				
+				// Timeout после 15 секунд ожидания
+				if time.Since(startWait) > 15*time.Second {
+					log.Printf("[ERROR] Timeout waiting for ICE connection (15s), aborting video forwarding")
+					return
+				}
+				
+				time.Sleep(100 * time.Millisecond) // Проверяем каждые 100мс
+			}
+		}
+		
+		log.Printf("[DEBUG] WebRTC: Starting video packet forwarding NOW (ICE connected)")
+		debugInfo("RTP", "video_forwarding_started", "Starting video packet forwarding after ICE connected", map[string]interface{}{
 			"videoPort": videoPort,
 		})
 		buffer := make([]byte, 65536)
@@ -3284,9 +3462,48 @@ func initializeWebRTCSession(peerConnection *webrtc.PeerConnection, windowID str
 		}
 	}()
 	
-	// Start audio packet forwarding goroutine
+	// Start audio packet forwarding goroutine - WAIT for ICE connection!
 	go func() {
-		log.Printf("[DEBUG] WebRTC: Starting audio packet forwarding goroutine")
+		log.Printf("[DEBUG] WebRTC: Audio packet forwarding goroutine started, waiting for ICE connection...")
+		
+		// КРИТИЧНО: Ждем пока ICE connection не станет "connected"!
+		// Проверяем начальное состояние на случай race condition
+		iceState := peerConnection.ICEConnectionState()
+		if iceState == webrtc.ICEConnectionStateConnected {
+			log.Printf("[SUCCESS] 🎯 ICE ALREADY CONNECTED! Starting audio packet forwarding immediately!")
+		} else {
+			log.Printf("[WAIT] 🕐 ICE state is %s, waiting for connected...", iceState.String())
+			startWait := time.Now()
+			for {
+				// Проверяем session context
+				select {
+				case <-sessionCtx.Done():
+					log.Printf("[DEBUG] WebRTC session cancelled while waiting for ICE connection")
+					return
+				default:
+				}
+				
+				iceState = peerConnection.ICEConnectionState()
+				if iceState == webrtc.ICEConnectionStateConnected {
+					waitDuration := time.Since(startWait)
+					log.Printf("[SUCCESS] 🎯 ICE CONNECTION READY after %.1fs! Starting audio packet forwarding now!", waitDuration.Seconds())
+					break
+				} else if iceState == webrtc.ICEConnectionStateFailed || iceState == webrtc.ICEConnectionStateClosed {
+					log.Printf("[ERROR] ICE connection failed/closed before audio forwarding started")
+					return
+				}
+				
+				// Timeout после 15 секунд ожидания
+				if time.Since(startWait) > 15*time.Second {
+					log.Printf("[ERROR] Timeout waiting for ICE connection (15s), aborting audio forwarding")
+					return
+				}
+				
+				time.Sleep(100 * time.Millisecond) // Проверяем каждые 100мс
+			}
+		}
+		
+		log.Printf("[DEBUG] WebRTC: Starting audio packet forwarding NOW (ICE connected)")
 		buffer := make([]byte, 65536)
 		var packetsRead, packetsSent int64
 		var lastLog time.Time
@@ -3363,13 +3580,20 @@ func notifyWebSocketClient(message map[string]interface{}) {
 		return
 	}
 	
+	// Check if WebSocket is alive before sending notification
+	if !isWebSocketAlive(activeWebSocketConn) {
+		log.Printf("[AUTO-RECONNECT] Active WebSocket is dead, clearing reference: %s", message["type"])
+		activeWebSocketConn = nil
+		return
+	}
+	
 	messageBytes, err := json.Marshal(message)
 	if err != nil {
 		log.Printf("[AUTO-RECONNECT] Failed to marshal notification: %v", err)
 		return
 	}
 	
-	log.Printf("[AUTO-RECONNECT] Sending notification to client: %s", message["type"])
+	log.Printf("[AUTO-RECONNECT] Sending notification to live WebSocket client: %s", message["type"])
 	
 	if err := safeWriteWebSocket(activeWebSocketConn, messageBytes); err != nil {
 		log.Printf("[AUTO-RECONNECT] Failed to send notification to client: %v", err)
