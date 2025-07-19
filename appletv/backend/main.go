@@ -1525,6 +1525,49 @@ func getWindowCount() int {
 
 // Глобальная функция для поиска window_id и размера окна с расширенной диагностикой
 func findWindow() (string, int, int, error) {
+	// ВРЕМЕННАЯ ДИАГНОСТИКА для отладки проблемы поиска UxPlay окон
+	log.Printf("[WINDOW_DIAG] === ДЕТАЛЬНАЯ ДИАГНОСТИКА ПОИСКА UXPLAY ОКОН ===")
+	
+	// 1. Проверим что контейнер существует и запущен
+	checkContainerCmd := exec.Command("docker", "ps", "--filter", "name=airplay", "--format", "table {{.Names}}\t{{.Status}}")
+	checkOutput, err := checkContainerCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[WINDOW_DIAG] ERROR checking containers: %v", err)
+		log.Printf("[WINDOW_DIAG] ERROR output: %s", string(checkOutput))
+	} else {
+		log.Printf("[WINDOW_DIAG] Available airplay containers:")
+		log.Printf("[WINDOW_DIAG] %s", string(checkOutput))
+	}
+	
+	// 2. Проверим процессы UxPlay в контейнере
+	psCmd := exec.Command("docker", "exec", "appletv-airplay-1", "ps", "aux")
+	psOutput, err := psCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("[WINDOW_DIAG] ERROR checking processes in appletv-airplay-1: %v", err)
+		log.Printf("[WINDOW_DIAG] Process check stderr: %s", string(psOutput))
+		
+		// Попробуем альтернативные имена контейнеров
+		alternativeNames := []string{"airplay-1", "appletv_airplay_1", "appletv-airplay_1"}
+		for _, name := range alternativeNames {
+			altCmd := exec.Command("docker", "exec", name, "ps", "aux")
+			altOutput, altErr := altCmd.CombinedOutput()
+			if altErr == nil {
+				log.Printf("[WINDOW_DIAG] SUCCESS with alternative container name '%s'!", name)
+				log.Printf("[WINDOW_DIAG] Processes in %s: %s", name, string(altOutput))
+				break
+			}
+		}
+	} else {
+		log.Printf("[WINDOW_DIAG] Processes in appletv-airplay-1:")
+		// Показываем только процессы uxplay для краткости
+		lines := strings.Split(string(psOutput), "\n")
+		for _, line := range lines {
+			if strings.Contains(strings.ToLower(line), "uxplay") || strings.Contains(line, "USER") {
+				log.Printf("[WINDOW_DIAG] %s", line)
+			}
+		}
+	}
+	
 	// Проверяем X11 соединение
 	displayCmd := exec.Command("xset", "q")
 	displayCmd.Env = append(os.Environ(), "DISPLAY=:0", "XAUTHORITY=/root/.Xauthority")
@@ -1551,6 +1594,21 @@ func findWindow() (string, int, int, error) {
 		}
 		
 		return "", 0, 0, err
+	} else {
+		log.Printf("[WINDOW_DIAG] SUCCESS: xwininfo executed successfully in appletv-airplay-1")
+		log.Printf("[WINDOW_DIAG] xwininfo output length: %d bytes", len(winInfoOut))
+		
+		// Показываем первые несколько строк для диагностики
+		lines := strings.Split(string(winInfoOut), "\n")
+		log.Printf("[WINDOW_DIAG] First 10 lines of xwininfo output:")
+		for i, line := range lines {
+			if i >= 10 {
+				break
+			}
+			if line != "" {
+				log.Printf("[WINDOW_DIAG] Line %d: %s", i+1, line)
+			}
+		}
 	}
 	
 	// Подсчитываем общее количество окон для диагностики
@@ -1760,6 +1818,67 @@ func findWindow() (string, int, int, error) {
 				log.Printf("[INFO] Found fallback window: id=%s size=%dx%d", id, w, h)
 				getWindowInfo(id)
 				return id, w, h, nil
+			}
+		}
+	}
+	
+	// ДЕТАЛЬНАЯ ДИАГНОСТИКА: покажем все найденные окна и почему они не подходят
+	log.Printf("[WINDOW_DIAG] === ДЕТАЛЬНЫЙ АНАЛИЗ НАЙДЕННЫХ ОКОН ===")
+	log.Printf("[WINDOW_DIAG] Общее количество окон найдено: %d", windowCount)
+	log.Printf("[WINDOW_DIAG] Потенциальные видео окна: %d", len(potentialVideoWindows))
+	
+	// Показываем все окна с ID размером больше 100x100
+	log.Printf("[WINDOW_DIAG] Анализ всех окон из xwininfo output:")
+	allWindows := strings.Split(string(winInfoOut), "\n")
+	for i, line := range allWindows {
+		if strings.Contains(line, "0x") && strings.Contains(line, "x") {
+			log.Printf("[WINDOW_DIAG] Window %d: %s", i+1, line)
+			
+			// Парсим ID и размеры для детального анализа
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				id := fields[0]
+				var w, h int
+				for _, f := range fields {
+					if strings.Contains(f, "x") && strings.Contains(f, "+") {
+						size := strings.Split(f, "x")
+						if len(size) > 1 {
+							w, _ = strconv.Atoi(size[0])
+							rest := strings.Split(size[1], "+")
+							if len(rest) > 0 {
+								h, _ = strconv.Atoi(rest[0])
+							}
+						}
+					}
+				}
+				
+				if w > 0 && h > 0 {
+					log.Printf("[WINDOW_DIAG]   → ID: %s, Size: %dx%d", id, w, h)
+					
+					// Проверим имя окна
+					nameCmd := exec.Command("docker", "exec", "appletv-airplay-1", "xwininfo", "-id", id, "-name", "-display", ":0")
+					nameOut, nameErr := nameCmd.CombinedOutput()
+					if nameErr == nil {
+						nameLines := strings.Split(string(nameOut), "\n")
+						for _, nameLine := range nameLines {
+							if strings.Contains(nameLine, "Window name:") {
+								log.Printf("[WINDOW_DIAG]   → Name: %s", nameLine)
+								break
+							}
+						}
+					}
+					
+					// Анализируем почему окно не прошло фильтры
+					isVideoSize := w >= 640 && h >= 480
+					log.Printf("[WINDOW_DIAG]   → Video size check (>=640x480): %v", isVideoSize)
+					
+					// Проверяем названия
+					lowerLine := strings.ToLower(line)
+					isUxPlayName := strings.Contains(lowerLine, "uxplay") || 
+						strings.Contains(lowerLine, "airplay") || 
+						strings.Contains(lowerLine, "appletv")
+					log.Printf("[WINDOW_DIAG]   → UxPlay name check: %v", isUxPlayName)
+				}
 			}
 		}
 	}
