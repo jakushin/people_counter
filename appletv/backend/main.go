@@ -54,6 +54,151 @@ var (
 	startTime time.Time
 )
 
+// Debug logging system
+type DebugMessage struct {
+	Timestamp time.Time `json:"timestamp"`
+	Level     string    `json:"level"`
+	Category  string    `json:"category"`
+	Event     string    `json:"event"`
+	Message   string    `json:"message"`
+	Details   map[string]interface{} `json:"details,omitempty"`
+}
+
+type DebugLogger struct {
+	connections map[*websocket.Conn]bool
+	mutex       sync.RWMutex
+	messages    []DebugMessage
+	maxMessages int
+}
+
+var (
+	debugLogger *DebugLogger
+	debugLoggerMutex sync.Mutex
+)
+
+func initDebugLogger() {
+	debugLogger = &DebugLogger{
+		connections: make(map[*websocket.Conn]bool),
+		messages:    make([]DebugMessage, 0),
+		maxMessages: 1000, // Keep last 1000 messages for saving
+	}
+}
+
+func (dl *DebugLogger) AddConnection(conn *websocket.Conn) {
+	dl.mutex.Lock()
+	defer dl.mutex.Unlock()
+	dl.connections[conn] = true
+	
+	// Send recent messages to new connection
+	for _, msg := range dl.messages {
+		msgBytes, _ := json.Marshal(msg)
+		conn.WriteMessage(websocket.TextMessage, msgBytes)
+	}
+}
+
+func (dl *DebugLogger) RemoveConnection(conn *websocket.Conn) {
+	dl.mutex.Lock()
+	defer dl.mutex.Unlock()
+	delete(dl.connections, conn)
+}
+
+func (dl *DebugLogger) Broadcast(level, category, event, message string, details map[string]interface{}) {
+	debugMsg := DebugMessage{
+		Timestamp: time.Now(),
+		Level:     level,
+		Category:  category,
+		Event:     event,
+		Message:   message,
+		Details:   details,
+	}
+	
+	dl.mutex.Lock()
+	// Add to history
+	dl.messages = append(dl.messages, debugMsg)
+	if len(dl.messages) > dl.maxMessages {
+		dl.messages = dl.messages[len(dl.messages)-dl.maxMessages:]
+	}
+	
+	// Broadcast to all connected debug clients
+	msgBytes, _ := json.Marshal(debugMsg)
+	deadConnections := make([]*websocket.Conn, 0)
+	
+	for conn := range dl.connections {
+		if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+			deadConnections = append(deadConnections, conn)
+		}
+	}
+	
+	// Remove dead connections
+	for _, conn := range deadConnections {
+		delete(dl.connections, conn)
+	}
+	dl.mutex.Unlock()
+	
+	// Also log to console for server-side debugging
+	log.Printf("[DEBUG] [%s/%s] %s: %s", category, event, level, message)
+}
+
+func (dl *DebugLogger) SaveToFile() error {
+	dl.mutex.RLock()
+	defer dl.mutex.RUnlock()
+	
+	filePath := "/var/log/appletv/debug.txt"
+	file, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("failed to create debug file: %v", err)
+	}
+	defer file.Close()
+	
+	file.WriteString(fmt.Sprintf("=== DEBUG LOG SAVED AT %s ===\n\n", time.Now().Format("2006-01-02 15:04:05")))
+	
+	for _, msg := range dl.messages {
+		line := fmt.Sprintf("[%s] [%s] [%s/%s] %s", 
+			msg.Timestamp.Format("15:04:05.000"), 
+			msg.Level, 
+			msg.Category, 
+			msg.Event, 
+			msg.Message)
+		
+		if msg.Details != nil && len(msg.Details) > 0 {
+			detailsJson, _ := json.Marshal(msg.Details)
+			line += fmt.Sprintf(" | Details: %s", string(detailsJson))
+		}
+		
+		file.WriteString(line + "\n")
+	}
+	
+	return nil
+}
+
+// Convenience functions for debug logging
+func debugLog(level, category, event, message string, details ...map[string]interface{}) {
+	if debugLogger == nil {
+		return
+	}
+	var det map[string]interface{}
+	if len(details) > 0 {
+		det = details[0]
+	}
+	debugLogger.Broadcast(level, category, event, message, det)
+}
+
+func debugInfo(category, event, message string, details ...map[string]interface{}) {
+	debugLog("INFO", category, event, message, details...)
+}
+
+func debugWarning(category, event, message string, details ...map[string]interface{}) {
+	debugLog("WARNING", category, event, message, details...)
+}
+
+func debugError(category, event, message string, details ...map[string]interface{}) {
+	debugLog("ERROR", category, event, message, details...)
+}
+
+func debugSuccess(category, event, message string, details ...map[string]interface{}) {
+	debugLog("SUCCESS", category, event, message, details...)
+}
+
 // Global variables for session management and auto-reconnection
 var (
 	activeSession   *WebRTCSession
@@ -376,6 +521,13 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 	}
 	
 	log.Printf("[INFO] WebRTC: Starting optimized video capture from AirPlay window")
+	debugInfo("FFMPEG", "capture_start", "Starting optimized video capture from AirPlay window", map[string]interface{}{
+		"windowID": windowID,
+		"width": winW,
+		"height": winH,
+		"videoPort": videoPort,
+		"audioPort": audioPort,
+	})
 	
 	// Оптимизированные параметры FFmpeg для лучшего захвата
 	args := []string{
@@ -433,7 +585,23 @@ func startFFmpegRTP(windowID string, winW, winH int, videoPort, audioPort int) (
 	log.Printf("[INFO] WebRTC: Video capture: window %s (%dx%d) -> RTP port %d", 
 		windowID, winW, winH, videoPort)
 	
-	return cmd, cmd.Start()
+	err := cmd.Start()
+	if err != nil {
+		debugError("FFMPEG", "start_failed", "Failed to start FFmpeg process", map[string]interface{}{
+			"error": err.Error(),
+			"windowID": windowID,
+			"videoPort": videoPort,
+		})
+		return cmd, err
+	}
+	
+	debugSuccess("FFMPEG", "started", "FFmpeg process started successfully", map[string]interface{}{
+		"windowID": windowID,
+		"videoPort": videoPort,
+		"processID": cmd.Process.Pid,
+	})
+	
+	return cmd, nil
 }
 
 // Функция для диагностики DISPLAY окружения
@@ -513,6 +681,10 @@ func main() {
 	// Инициализируем логирование
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Printf("Starting AppleTV Backend Server...")
+	
+	// Initialize debug logger
+	initDebugLogger()
+	debugInfo("SYSTEM", "startup", "AppleTV Backend Server starting up")
 	
 	// Initialize auto-reconnect state
 	log.Printf("[AUTO-RECONNECT] Initializing enhanced auto-reconnect system")
@@ -717,6 +889,10 @@ func main() {
 	r.GET("/api/airplay/diagnostics", gin.WrapH(http.HandlerFunc(airplayDiagnosticsHandler)))
 	r.GET("/api/airplay/logs", gin.WrapH(http.HandlerFunc(airplayLogsHandler)))
 
+	// Debug API endpoints
+	r.GET("/api/debug/stream", gin.WrapH(http.HandlerFunc(debugStreamHandler)))
+	r.POST("/api/debug/save", gin.WrapH(http.HandlerFunc(debugSaveHandler)))
+
 
 
 
@@ -771,11 +947,16 @@ func main() {
 			// ИСПРАВЛЕНО: НЕ отключаем auto-reconnect при закрытии WebSocket
 			// Автоматическое переподключение должно работать независимо от WebSocket
 			log.Printf("[DEBUG] WebRTC: WebSocket closed, but auto-reconnect remains enabled")
+			debugInfo("WEBSOCKET", "connection_closed", "WebSocket closed, but auto-reconnect remains enabled")
 		}()
 		
-			log.Printf("[INFO] WebSocket connection established")
-	logger := &logWriter{level: "info", event: "webrtc_signaling_open"}
-	json.NewEncoder(logger).Encode(map[string]interface{}{"timestamp": time.Now().Format(time.RFC3339)})
+		log.Printf("[INFO] WebSocket connection established")
+		debugSuccess("WEBSOCKET", "connection_established", "WebSocket connection established for WebRTC signaling", map[string]interface{}{
+			"remoteAddr": r.RemoteAddr,
+		})
+		
+		logger := &logWriter{level: "info", event: "webrtc_signaling_open"}
+		json.NewEncoder(logger).Encode(map[string]interface{}{"timestamp": time.Now().Format(time.RFC3339)})
 		
 		// Force immediate window state check when WebSocket connects
 		// This catches cases where iPhone reconnected between monitoring intervals
@@ -897,23 +1078,36 @@ func main() {
 		// ICE connection state monitoring с подробным логированием
 		peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 			log.Printf("[INFO] WebRTC: ICE Connection State changed to: %s", connectionState.String())
+			
+			details := map[string]interface{}{
+				"state": connectionState.String(),
+				"sessionID": sessionID,
+			}
+			
 			switch connectionState {
 			case webrtc.ICEConnectionStateNew:
 				log.Printf("[DEBUG] WebRTC: ICE connection is new, waiting for candidates")
+				debugInfo("WEBRTC", "ice_state_new", "ICE connection is new, waiting for candidates", details)
 			case webrtc.ICEConnectionStateChecking:
 				log.Printf("[DEBUG] WebRTC: ICE connection is checking connectivity")
+				debugInfo("WEBRTC", "ice_state_checking", "ICE connection is checking connectivity", details)
 			case webrtc.ICEConnectionStateConnected:
 				log.Printf("[SUCCESS] WebRTC: ICE connection established successfully!")
+				debugSuccess("WEBRTC", "ice_state_connected", "ICE connection established successfully!", details)
 			case webrtc.ICEConnectionStateCompleted:
 				log.Printf("[SUCCESS] WebRTC: ICE connection completed successfully!")
+				debugSuccess("WEBRTC", "ice_state_completed", "ICE connection completed successfully!", details)
 			case webrtc.ICEConnectionStateFailed:
 				log.Printf("[ERROR] WebRTC: ICE connection failed - no connectivity established")
+				debugError("WEBRTC", "ice_state_failed", "ICE connection failed - no connectivity established", details)
 				cleanupWebRTCSession()
 			case webrtc.ICEConnectionStateDisconnected:
 				log.Printf("[WARNING] WebRTC: ICE connection disconnected")
+				debugWarning("WEBRTC", "ice_state_disconnected", "ICE connection disconnected", details)
 				cleanupWebRTCSession()
 			case webrtc.ICEConnectionStateClosed:
 				log.Printf("[INFO] WebRTC: ICE connection closed")
+				debugInfo("WEBRTC", "ice_state_closed", "ICE connection closed", details)
 				cleanupWebRTCSession()
 			}
 		})
@@ -922,23 +1116,37 @@ func main() {
 		peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 			log.Printf("[INFO] WebRTC: Connection State changed to: %s", state.String())
 			
+			iceState := peerConnection.ICEConnectionState()
+			details := map[string]interface{}{
+				"connectionState": state.String(),
+				"iceState": iceState.String(),
+				"sessionID": sessionID,
+			}
+			
 			// Детальное логирование для диагностики
 			if state == webrtc.PeerConnectionStateConnected {
 				log.Printf("[SUCCESS] WebRTC: PeerConnection is now CONNECTED - media should be flowing")
-				iceState := peerConnection.ICEConnectionState()
 				log.Printf("[SUCCESS] WebRTC: ICE Connection State: %s", iceState.String())
+				debugSuccess("WEBRTC", "connection_established", "PeerConnection is now CONNECTED - media should be flowing", details)
 			} else if state == webrtc.PeerConnectionStateFailed {
 				log.Printf("[ERROR] WebRTC: PeerConnection FAILED - connection lost")
-				iceState := peerConnection.ICEConnectionState()
 				log.Printf("[ERROR] WebRTC: ICE Connection State at failure: %s", iceState.String())
+				debugError("WEBRTC", "connection_failed", "PeerConnection FAILED - connection lost", details)
 			} else if state == webrtc.PeerConnectionStateClosed {
 				log.Printf("[INFO] WebRTC: PeerConnection CLOSED")
+				debugInfo("WEBRTC", "connection_closed", "PeerConnection CLOSED", details)
 			} else if state == webrtc.PeerConnectionStateDisconnected {
 				log.Printf("[WARNING] WebRTC: PeerConnection DISCONNECTED - may recover")
+				debugWarning("WEBRTC", "connection_disconnected", "PeerConnection DISCONNECTED - may recover", details)
+			} else if state == webrtc.PeerConnectionStateConnecting {
+				debugInfo("WEBRTC", "connection_connecting", "PeerConnection is connecting", details)
+			} else if state == webrtc.PeerConnectionStateNew {
+				debugInfo("WEBRTC", "connection_new", "PeerConnection created", details)
 			}
 			
 			if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 				log.Printf("[WARNING] WebRTC: Connection failed/closed, cleaning up session")
+				debugWarning("WEBRTC", "connection_cleanup", "Connection failed/closed, cleaning up session", details)
 				cleanupWebRTCSession()
 			}
 		})
@@ -957,17 +1165,36 @@ func main() {
 		peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 			if candidate == nil {
 				log.Printf("[DEBUG] WebRTC: ICE gathering completed (nil candidate)")
+				debugInfo("WEBRTC", "ice_gathering_complete", "ICE gathering completed (nil candidate received)")
 				return
 			}
 			log.Printf("[DEBUG] WebRTC: Generated ICE candidate: %s", candidate.String())
 			log.Printf("[DEBUG] WebRTC: ICE candidate details - Type: %s, Protocol: %s, Address: %s, Port: %d", 
 				candidate.Typ.String(), candidate.Protocol.String(), candidate.Address, candidate.Port)
+			
+			debugInfo("WEBRTC", "ice_candidate_generated", "Generated ICE candidate", map[string]interface{}{
+				"type": candidate.Typ.String(),
+				"protocol": candidate.Protocol.String(),
+				"address": candidate.Address,
+				"port": candidate.Port,
+				"priority": candidate.Priority,
+				"sessionID": sessionID,
+			})
+			
 			candidateMsg, _ := json.Marshal(map[string]interface{}{
 				"type": "ice-candidate",
 				"candidate": candidate.ToJSON(),
 			})
 			if err := safeWriteWebSocket(conn, candidateMsg); err != nil {
 				log.Printf("[ERROR] Failed to send ICE candidate: %v", err)
+				debugError("WEBRTC", "ice_candidate_send_failed", "Failed to send ICE candidate to client", map[string]interface{}{
+					"error": err.Error(),
+					"candidateType": candidate.Typ.String(),
+				})
+			} else {
+				debugSuccess("WEBRTC", "ice_candidate_sent", "ICE candidate sent to client", map[string]interface{}{
+					"candidateType": candidate.Typ.String(),
+				})
 			}
 		})
 		
@@ -1047,9 +1274,12 @@ func main() {
 			switch msg["type"] {
 			case "offer":
 				log.Printf("[DEBUG] WebRTC: Processing SDP offer")
+				debugInfo("WEBRTC", "sdp_offer_received", "Processing SDP offer from client")
+				
 				sdpStr, ok := msg["sdp"].(string)
 				if !ok {
 					log.Printf("[ERROR] Invalid SDP in offer")
+					debugError("WEBRTC", "sdp_offer_invalid", "Invalid SDP in offer - not a string")
 					continue
 				}
 				
@@ -1060,10 +1290,14 @@ func main() {
 				
 				if err := peerConnection.SetRemoteDescription(offer); err != nil {
 					log.Printf("[ERROR] Failed to set remote description: %v", err)
+					debugError("WEBRTC", "sdp_offer_set_failed", "Failed to set remote description", map[string]interface{}{
+						"error": err.Error(),
+					})
 					conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to set remote description"}`))
 					continue
 				}
 				log.Printf("[INFO] WebRTC: Remote description set successfully")
+				debugSuccess("WEBRTC", "sdp_offer_set_success", "Remote description set successfully")
 
 				// Check if this is the first SDP offer for this PeerConnection (no tracks yet)
 				hasNoTracks := len(peerConnection.GetSenders()) == 0
@@ -1094,39 +1328,55 @@ func main() {
 				answer, err := peerConnection.CreateAnswer(nil)
 				if err != nil {
 					log.Printf("[ERROR] Failed to create answer: %v", err)
+					debugError("WEBRTC", "sdp_answer_create_failed", "Failed to create SDP answer", map[string]interface{}{
+						"error": err.Error(),
+					})
 					conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to create answer"}`))
 					continue
 				}
 				log.Printf("[INFO] WebRTC: Answer created successfully")
+				debugSuccess("WEBRTC", "sdp_answer_created", "SDP answer created successfully")
 
 				if err := peerConnection.SetLocalDescription(answer); err != nil {
 					log.Printf("[ERROR] Failed to set local description: %v", err)
+					debugError("WEBRTC", "sdp_answer_set_failed", "Failed to set local description", map[string]interface{}{
+						"error": err.Error(),
+					})
 					conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to set local description"}`))
 					continue
 				}
 				log.Printf("[INFO] WebRTC: Local description set successfully")
+				debugSuccess("WEBRTC", "sdp_answer_set_success", "Local description set successfully")
 
 				answerMsg, _ := json.Marshal(map[string]interface{}{
 					"type": "answer",
 					"sdp":  answer.SDP,
 				})
-							if err := safeWriteWebSocket(conn, answerMsg); err != nil {
-				log.Printf("[ERROR] Failed to send answer: %v", err)
+				if err := safeWriteWebSocket(conn, answerMsg); err != nil {
+					log.Printf("[ERROR] Failed to send answer: %v", err)
+					debugError("WEBRTC", "sdp_answer_send_failed", "Failed to send SDP answer to client", map[string]interface{}{
+						"error": err.Error(),
+					})
 				} else {
 					log.Printf("[INFO] WebRTC: SDP answer sent to client")
+					debugSuccess("WEBRTC", "sdp_answer_sent", "SDP answer sent to client successfully")
 				}
 
 			case "ice-candidate":
 				log.Printf("[DEBUG] WebRTC: Processing ICE candidate")
+				debugInfo("WEBRTC", "ice_candidate_received", "Processing ICE candidate from client")
+				
 				candidateData, ok := msg["candidate"].(map[string]interface{})
 				if !ok {
 					log.Printf("[ERROR] Invalid ICE candidate format")
+					debugError("WEBRTC", "ice_candidate_invalid_format", "Invalid ICE candidate format from client")
 					continue
 				}
 				
 				candidateStr, ok := candidateData["candidate"].(string)
 				if !ok {
 					log.Printf("[ERROR] Missing candidate string")
+					debugError("WEBRTC", "ice_candidate_missing_string", "Missing candidate string in ICE candidate")
 					continue
 				}
 				
@@ -1141,8 +1391,17 @@ func main() {
 				
 				if err := peerConnection.AddICECandidate(candidate); err != nil {
 					log.Printf("[ERROR] Failed to add ICE candidate: %v", err)
+					debugError("WEBRTC", "ice_candidate_add_failed", "Failed to add ICE candidate from client", map[string]interface{}{
+						"error": err.Error(),
+						"candidateString": candidateStr,
+						"sdpMid": sdpMid,
+					})
 				} else {
 					log.Printf("[DEBUG] WebRTC: ICE candidate added successfully")
+					debugSuccess("WEBRTC", "ice_candidate_added", "ICE candidate added successfully", map[string]interface{}{
+						"candidateString": candidateStr,
+						"sdpMid": sdpMid,
+					})
 				}
 
 			default:
@@ -1256,6 +1515,8 @@ func findWindow() (string, int, int, error) {
 	
 	// Приоритет 1: Ищем окна с именем UxPlay или AppleTV-Backend
 	log.Printf("[DEBUG] Priority 1: Searching for UxPlay/AppleTV/AirPlay window names...")
+	debugInfo("AIRPLAY", "window_search_priority1", "Searching for UxPlay/AppleTV/AirPlay window names")
+	
 	for _, line := range strings.Split(string(winInfoOut), "\n") {
 		if strings.Contains(strings.ToLower(line), "uxplay") || 
 		   strings.Contains(strings.ToLower(line), "appletv") ||
@@ -1284,6 +1545,12 @@ func findWindow() (string, int, int, error) {
 			getWindowInfo(id)
 			
 			if w > 100 && h > 100 { // Проверяем минимальный размер
+				debugSuccess("AIRPLAY", "window_found_priority1", "Found UxPlay/AirPlay window by name", map[string]interface{}{
+					"windowID": id,
+					"width": w,
+					"height": h,
+					"priority": "name_match",
+				})
 				return id, w, h, nil
 			}
 		}
@@ -1396,6 +1663,10 @@ func findWindow() (string, int, int, error) {
 	}
 	
 	log.Printf("[ERROR] All priorities failed! No suitable UxPlay window found in %d total windows (potentialVideos: %d)", windowCount, len(potentialVideoWindows))
+	debugError("AIRPLAY", "window_not_found", "All priorities failed! No suitable UxPlay window found", map[string]interface{}{
+		"totalWindows": windowCount,
+		"potentialVideoWindows": len(potentialVideoWindows),
+	})
 	return "", 0, 0, nil
 }
 
@@ -1777,6 +2048,57 @@ func airplayLogsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	json.NewEncoder(w).Encode(response)
+}
+
+// Debug API handlers
+func debugStreamHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("Failed to upgrade debug WebSocket: %v", err)
+		return
+	}
+	defer conn.Close()
+	
+	debugInfo("DEBUG", "websocket_connect", "Debug WebSocket client connected")
+	
+	// Add connection to debug logger
+	debugLogger.AddConnection(conn)
+	defer debugLogger.RemoveConnection(conn)
+	
+	// Keep connection alive
+	for {
+		_, _, err := conn.ReadMessage()
+		if err != nil {
+			debugInfo("DEBUG", "websocket_disconnect", "Debug WebSocket client disconnected")
+			break
+		}
+	}
+}
+
+func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
+	if debugLogger == nil {
+		http.Error(w, "Debug logger not initialized", http.StatusInternalServerError)
+		return
+	}
+	
+	err := debugLogger.SaveToFile()
+	if err != nil {
+		debugError("DEBUG", "save_failed", "Failed to save debug log to file", map[string]interface{}{
+			"error": err.Error(),
+		})
+		http.Error(w, fmt.Sprintf("Failed to save debug log: %v", err), http.StatusInternalServerError)
+		return
+	}
+	
+	debugSuccess("DEBUG", "save_success", "Debug log saved to /var/log/appletv/debug.txt")
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"message": "Debug log saved to debug.txt",
+		"file": "/var/log/appletv/debug.txt",
+		"timestamp": time.Now(),
+	})
 }
 
 // Функция для получения информации о Docker контейнерах
@@ -2219,11 +2541,13 @@ func handleWindowDisappeared() {
 	defer sessionMutex.Unlock()
 	
 	log.Printf("[AUTO-RECONNECT] UxPlay window disappeared - iPhone disconnected")
+	debugWarning("AUTO_RECONNECT", "window_disappeared", "UxPlay window disappeared - iPhone disconnected")
 	
 	// Clear reconnection readiness flags
 	phoneReconnectedAndReady = false
 	reconnectedWindowID = ""
 	log.Printf("[AUTO-RECONNECT] Cleared reconnection readiness flags")
+	debugInfo("AUTO_RECONNECT", "flags_cleared", "Cleared reconnection readiness flags")
 	
 	// Notify client about disconnection
 	if activeWebSocketConn != nil {
@@ -2263,10 +2587,14 @@ func handleWindowAppeared() {
 	defer sessionMutex.Unlock()
 	
 	log.Printf("[AUTO-RECONNECT] UxPlay window appeared - iPhone reconnected")
+	debugSuccess("AUTO_RECONNECT", "window_appeared", "UxPlay window appeared - iPhone reconnected")
 	
 	// Ignore window appearance during first 30 seconds after startup (initial UxPlay startup)
 	if time.Since(startTime) < 30*time.Second {
 		log.Printf("[AUTO-RECONNECT] Ignoring window appearance during startup period (uptime: %.1fs)", time.Since(startTime).Seconds())
+		debugInfo("AUTO_RECONNECT", "startup_ignore", "Ignoring window appearance during startup period", map[string]interface{}{
+			"uptime_seconds": time.Since(startTime).Seconds(),
+		})
 		return
 	}
 	

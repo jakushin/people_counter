@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import DebugPanel from './DebugPanel';
 
 export default function WebRTCStream() {
   const videoRef = useRef(null);
@@ -647,6 +648,9 @@ export default function WebRTCStream() {
         <br />
         <strong>Диагностика:</strong> Если подключение не удается, проверьте что AirPlay активен и окно больше 100x100 пикселей.
       </div>
+      
+      {/* Debug Panel */}
+      <DebugPanel />
     </div>
   );
 } 
