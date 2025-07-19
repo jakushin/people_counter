@@ -8,6 +8,12 @@ export default function WebRTCStream() {
   // Обертка для setStatus с логированием
   const setStatusWithLog = (newStatus) => {
     console.log(`📊 STATUS CHANGE: ${status} → ${newStatus}`);
+    
+    // Also log status changes to debug console
+    if (window.debugLogUserAction && status !== newStatus) {
+      window.debugLogUserAction('WebRTC Status Change', `${status} → ${newStatus}`);
+    }
+    
     setStatus(newStatus);
   };
   const [error, setError] = useState(null);
@@ -40,7 +46,37 @@ export default function WebRTCStream() {
       
       if (secondsLeft <= 0) {
         setAutoReconnectCountdown(null);
+        
+        // Финальная проверка перед автопереподключением
+        const isWebRTCWorking = pcRef.current && 
+          (pcRef.current.connectionState === 'connected' || 
+           pcRef.current.iceConnectionState === 'connected') &&
+          status === 'connected';
+           
+        const isVideoWorking = videoRef.current && 
+          videoRef.current.srcObject && 
+          videoRef.current.srcObject.getTracks().length > 0;
+        
+                 if (isWebRTCWorking || isVideoWorking) {
+           console.log('🚫 COUNTDOWN FINAL CHECK: WebRTC/Video working - CANCELLING auto-reconnection');
+           setServerStatus('Auto-reconnection cancelled - WebRTC already working');
+           
+           // Log countdown cancellation
+           if (window.debugLogUserAction) {
+             window.debugLogUserAction('Auto-reconnect Cancelled', 'Final check detected working WebRTC - countdown cancelled');
+           }
+           
+           return;
+         }
+        
+        console.log('✅ COUNTDOWN FINAL CHECK: WebRTC not working - proceeding with auto-reconnection');
         console.log('WebRTC Debug: Auto-reconnecting after countdown');
+        
+        // Log automatic reconnection
+        if (window.debugLogUserAction) {
+          window.debugLogUserAction('Auto-reconnect Triggered', 'System automatically reconnecting after 5 second countdown');
+        }
+        
         // Use existing WebSocket for auto-reconnection instead of creating new one
         startWebRTCWithExistingSocket();
       } else {
@@ -53,6 +89,11 @@ export default function WebRTCStream() {
 
   // Функция отмены автопереподключения
   const cancelAutoReconnect = () => {
+    // Log user action if called manually (not automatically)
+    if (autoReconnectCountdown !== null && window.debugLogUserAction) {
+      window.debugLogUserAction('Cancel Auto-reconnect', `Cancelled with ${autoReconnectCountdown} seconds remaining`);
+    }
+    
     if (autoReconnectTimeoutRef.current) {
       clearTimeout(autoReconnectTimeoutRef.current);
       autoReconnectTimeoutRef.current = null;
@@ -195,6 +236,11 @@ export default function WebRTCStream() {
   // Функция запуска WebRTC соединения
   const startWebRTC = async () => {
     if (isConnecting) return;
+    
+    // Log user action
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('Start WebRTC', `Current status: ${status}`);
+    }
     
     setIsConnecting(true);
     setStatusWithLog('connecting');
@@ -442,13 +488,43 @@ export default function WebRTCStream() {
           } else if (message.type === 'reconnection_ready') {
             console.log(`WebRTC Debug: System ready for reconnection: ${message.message}`);
             
-            // Check if WebRTC is already connected and working
-            if (pcRef.current && pcRef.current.connectionState === 'connected') {
-              console.log('WebRTC Debug: WebRTC already connected - ignoring reconnection_ready');
+            // Детальная диагностика состояния соединения
+            const pcExists = !!pcRef.current;
+            const connectionState = pcRef.current ? pcRef.current.connectionState : 'no-pc';
+            const iceState = pcRef.current ? pcRef.current.iceConnectionState : 'no-pc';
+            const currentStatus = status;
+            const videoPlaying = videoRef.current && videoRef.current.srcObject && !videoRef.current.paused;
+            
+            console.log(`🔍 RECONNECTION_READY CHECK:`);
+            console.log(`   - pcRef exists: ${pcExists}`);
+            console.log(`   - connectionState: ${connectionState}`);
+            console.log(`   - iceConnectionState: ${iceState}`);
+            console.log(`   - UI status: ${currentStatus}`);
+            console.log(`   - Video playing: ${videoPlaying}`);
+            
+            // Улучшенная проверка - проверяем несколько условий
+            const isWebRTCWorking = pcRef.current && 
+              (pcRef.current.connectionState === 'connected' || 
+               pcRef.current.iceConnectionState === 'connected') &&
+              status === 'connected';
+               
+            const isVideoWorking = videoRef.current && 
+              videoRef.current.srcObject && 
+              videoRef.current.srcObject.getTracks().length > 0;
+            
+            if (isWebRTCWorking || isVideoWorking) {
+              console.log('🚫 WebRTC/Video already working - IGNORING reconnection_ready to prevent disruption');
               setServerStatus('WebRTC already connected - no reconnection needed');
+              
+              // Log prevented auto-reconnection
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Auto-reconnect Prevented', 'WebRTC already working - ignoring reconnection_ready signal');
+              }
+              
               return;
             }
             
+            console.log('✅ WebRTC not working - proceeding with auto-reconnection');
             setServerStatus('iPhone reconnected - auto-reconnecting in 5 seconds');
             setStatusWithLog('ready_for_reconnect');
             setError(null);
@@ -456,13 +532,43 @@ export default function WebRTCStream() {
           } else if (message.type === 'window_changed') {
             console.log(`WebRTC Debug: iPhone window changed: ${message.message}`);
             
-            // Check if WebRTC is already connected and working
-            if (pcRef.current && pcRef.current.connectionState === 'connected') {
-              console.log('WebRTC Debug: WebRTC already connected - ignoring window_changed');
+            // Детальная диагностика состояния соединения
+            const pcExists = !!pcRef.current;
+            const connectionState = pcRef.current ? pcRef.current.connectionState : 'no-pc';
+            const iceState = pcRef.current ? pcRef.current.iceConnectionState : 'no-pc';
+            const currentStatus = status;
+            const videoPlaying = videoRef.current && videoRef.current.srcObject && !videoRef.current.paused;
+            
+            console.log(`🔍 WINDOW_CHANGED CHECK:`);
+            console.log(`   - pcRef exists: ${pcExists}`);
+            console.log(`   - connectionState: ${connectionState}`);
+            console.log(`   - iceConnectionState: ${iceState}`);
+            console.log(`   - UI status: ${currentStatus}`);
+            console.log(`   - Video playing: ${videoPlaying}`);
+            
+            // Улучшенная проверка - проверяем несколько условий
+            const isWebRTCWorking = pcRef.current && 
+              (pcRef.current.connectionState === 'connected' || 
+               pcRef.current.iceConnectionState === 'connected') &&
+              status === 'connected';
+               
+            const isVideoWorking = videoRef.current && 
+              videoRef.current.srcObject && 
+              videoRef.current.srcObject.getTracks().length > 0;
+            
+            if (isWebRTCWorking || isVideoWorking) {
+              console.log('🚫 WebRTC/Video already working - IGNORING window_changed to prevent disruption');
               setServerStatus('WebRTC already connected - no window change reconnection needed');
+              
+              // Log prevented auto-reconnection
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Auto-reconnect Prevented', 'WebRTC already working - ignoring window_changed signal');
+              }
+              
               return;
             }
             
+            console.log('✅ WebRTC not working - proceeding with window change reconnection');
             setServerStatus('iPhone reconnected with new window - auto-reconnecting in 5 seconds');
             setStatusWithLog('ready_for_reconnect');
             setError(null);
@@ -510,6 +616,11 @@ export default function WebRTCStream() {
 
   // Функция остановки WebRTC соединения
   const stopWebRTC = () => {
+    // Log user action
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('Stop WebRTC', `Stopping from status: ${status}, WebSocket connected: ${wsRef.current?.readyState === WebSocket.OPEN}`);
+    }
+    
     console.log('WebRTC Debug: Stopping WebRTC connection');
     
     // Отменяем автопереподключение если активно
@@ -550,9 +661,50 @@ export default function WebRTCStream() {
 
   // Очистка при размонтировании
   useEffect(() => {
+    // Log component load
+    if (window.debugLogUserAction) {
+      window.debugLogUserAction('Page Load', 'WebRTC Stream component loaded');
+    }
+    
     return () => {
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Page Unload', 'WebRTC Stream component unloading');
+      }
       stopWebRTC();
       cancelAutoReconnect();
+    };
+  }, []);
+
+  // Log page visibility changes for debugging
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Page Visibility Change', 
+          `Page is now ${document.hidden ? 'hidden' : 'visible'}`);
+      }
+    };
+
+    const handlePageFocus = () => {
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Page Focus', 'User focused browser tab');
+      }
+    };
+
+    const handlePageBlur = () => {
+      if (window.debugLogUserAction) {
+        window.debugLogUserAction('Page Blur', 'User left browser tab');
+      }
+    };
+
+    // Add event listeners
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handlePageFocus);
+    window.addEventListener('blur', handlePageBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handlePageFocus);
+      window.removeEventListener('blur', handlePageBlur);
     };
   }, []);
 
@@ -634,6 +786,51 @@ export default function WebRTCStream() {
             playsInline 
             style={{background:'#222'}}
             poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='640' height='360'%3E%3Crect width='100%25' height='100%25' fill='%23222'/%3E%3Ctext x='50%25' y='50%25' text-anchor='middle' dy='0.35em' fill='%23888' font-family='Arial' font-size='24'%3EНажмите Start для подключения%3C/text%3E%3C/svg%3E"
+            onLoadStart={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'loadstart - Started loading video data');
+              }
+            }}
+            onCanPlay={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'canplay - Video ready to start playing');
+              }
+            }}
+            onPlay={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'play - Video started playing');
+              }
+            }}
+            onPause={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'pause - Video paused');
+              }
+            }}
+            onEnded={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'ended - Video playback ended');
+              }
+            }}
+            onError={(e) => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', `error - Video error: ${e.target.error?.message || 'Unknown error'}`);
+              }
+            }}
+            onStalled={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'stalled - Video playback stalled');
+              }
+            }}
+            onSuspend={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'suspend - Video loading suspended');
+              }
+            }}
+            onWaiting={() => {
+              if (window.debugLogUserAction) {
+                window.debugLogUserAction('Video Event', 'waiting - Video waiting for data');
+              }
+            }}
           />
         </div>
       </div>

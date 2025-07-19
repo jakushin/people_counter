@@ -11,6 +11,39 @@ export default function DebugPanel() {
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
 
+  // Function to log user actions to debug console
+  const logUserAction = (action, details = '') => {
+    const timestamp = new Date().toLocaleTimeString('en-GB', { 
+      hour12: false, 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      fractionalSecondDigits: 3 
+    });
+    
+    const userActionMessage = {
+      timestamp: `[${timestamp}]`,
+      level: '[USER]',
+      category: '[ACTION]',
+      message: action,
+      details: details ? ` | ${details}` : ''
+    };
+    
+    // Add directly to local messages for immediate display
+    setMessages(prev => [...prev, userActionMessage]);
+    
+    // Also log to browser console for additional debugging
+    console.log(`👤 USER ACTION: ${action}${details ? ` | ${details}` : ''}`);
+  };
+
+  // Expose logUserAction globally for WebRTCStream to use
+  useEffect(() => {
+    window.debugLogUserAction = logUserAction;
+    return () => {
+      delete window.debugLogUserAction;
+    };
+  }, [logUserAction]);
+
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -79,6 +112,7 @@ export default function DebugPanel() {
 
   // Save debug log to file
   const saveDebugLog = async () => {
+    logUserAction('Save Debug Log', 'Attempting to save debug.txt');
     setIsSaving(true);
     try {
       const response = await fetch(`http://${window.location.hostname}:8080/api/debug/save`, {
@@ -100,12 +134,14 @@ export default function DebugPanel() {
           details: { filename: result.file }
         };
         setMessages(prev => [...prev, saveMessage]);
+        logUserAction('Save Debug Log', `SUCCESS: File saved as ${result.file}`);
       } else {
         throw new Error('Failed to save debug log');
       }
     } catch (err) {
       console.error('Failed to save debug log:', err);
       setError('Failed to save debug log: ' + err.message);
+      logUserAction('Save Debug Log', `ERROR: ${err.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -113,6 +149,7 @@ export default function DebugPanel() {
 
   // Start debug logging
   const startDebugLogging = async () => {
+    logUserAction('Start Debug Logging', 'Enabling debug logging on backend');
     setIsStarting(true);
     try {
       const response = await fetch(`http://${window.location.hostname}:8080/api/debug/start`, {
@@ -126,12 +163,14 @@ export default function DebugPanel() {
         const result = await response.json();
         setIsLoggingEnabled(true);
         setError(null);
+        logUserAction('Start Debug Logging', 'SUCCESS: Debug logging enabled');
       } else {
         throw new Error('Failed to start debug logging');
       }
     } catch (err) {
       console.error('Failed to start debug logging:', err);
       setError('Failed to start debug logging: ' + err.message);
+      logUserAction('Start Debug Logging', `ERROR: ${err.message}`);
     } finally {
       setIsStarting(false);
     }
@@ -139,6 +178,7 @@ export default function DebugPanel() {
 
   // Stop debug logging
   const stopDebugLogging = async () => {
+    logUserAction('Stop Debug Logging', 'Disabling debug logging on backend');
     setIsStopping(true);
     try {
       const response = await fetch(`http://${window.location.hostname}:8080/api/debug/stop`, {
@@ -152,12 +192,14 @@ export default function DebugPanel() {
         const result = await response.json();
         setIsLoggingEnabled(false);
         setError(null);
+        logUserAction('Stop Debug Logging', 'SUCCESS: Debug logging disabled');
       } else {
         throw new Error('Failed to stop debug logging');
       }
     } catch (err) {
       console.error('Failed to stop debug logging:', err);
       setError('Failed to stop debug logging: ' + err.message);
+      logUserAction('Stop Debug Logging', `ERROR: ${err.message}`);
     } finally {
       setIsStopping(false);
     }
@@ -165,6 +207,8 @@ export default function DebugPanel() {
 
   // Clear debug messages
   const clearMessages = () => {
+    const messageCount = messages.length;
+    logUserAction('Clear Debug Messages', `Cleared ${messageCount} messages from console`);
     setMessages([]);
   };
 
@@ -201,6 +245,19 @@ export default function DebugPanel() {
       case 'FFMPEG': return '#e83e8c';
       case 'SYSTEM': return '#6c757d';
       case 'DEBUG': return '#343a40';
+      case '[ACTION]': return '#28a745'; // User actions in green
+      default: return '#6c757d';
+    }
+  };
+
+  // Get level color  
+  const getLevelColorForUser = (level) => {
+    switch (level) {
+      case '[USER]': return '#17a2b8'; // User level in cyan
+      case 'SUCCESS': return '#28a745';
+      case 'ERROR': return '#dc3545';
+      case 'WARNING': return '#ffc107';
+      case 'INFO': return '#17a2b8';
       default: return '#6c757d';
     }
   };
@@ -371,32 +428,37 @@ export default function DebugPanel() {
           messages.map((msg, index) => (
             <div key={index} style={{ marginBottom: '2px' }}>
               <span style={{ color: '#6c757d' }}>
-                [{formatTime(msg.timestamp)}]
+                {msg.timestamp || `[${formatTime(msg.timestamp)}]`}
               </span>
               {' '}
               <span style={{ 
-                color: getLevelColor(msg.level),
+                color: msg.level === '[USER]' ? getLevelColorForUser(msg.level) : getLevelColor(msg.level),
                 fontWeight: 'bold'
               }}>
-                [{msg.level}]
+                {msg.level}
               </span>
               {' '}
               <span style={{ 
                 color: getCategoryColor(msg.category),
                 fontWeight: 'bold'
               }}>
-                [{msg.category}/{msg.event}]
+                {msg.category}{msg.event ? `/${msg.event}` : ''}
               </span>
               {' '}
               <span style={{ color: '#212529' }}>
                 {msg.message}
               </span>
-              {msg.details && Object.keys(msg.details).length > 0 && (
+              {/* Handle both string and object details */}
+              {msg.details && (
                 <span style={{ color: '#6c757d', fontSize: '10px' }}>
-                  {' | '}
-                  {Object.entries(msg.details).map(([key, value]) => 
-                    `${key}=${JSON.stringify(value)}`
-                  ).join(', ')}
+                  {typeof msg.details === 'string' ? 
+                    msg.details : 
+                    Object.keys(msg.details).length > 0 ? (
+                      ' | ' + Object.entries(msg.details).map(([key, value]) => 
+                        `${key}=${JSON.stringify(value)}`
+                      ).join(', ')
+                    ) : ''
+                  }
                 </span>
               )}
             </div>
