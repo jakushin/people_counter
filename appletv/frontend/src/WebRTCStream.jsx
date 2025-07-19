@@ -641,14 +641,6 @@ export default function WebRTCStream() {
         </div>
       )}
       
-      <div style={{marginTop:16, color:'#888', fontSize:14}}>
-        <strong>WebRTC режим:</strong> Низкая задержка (0.1-0.5s), но требует активное AirPlay соединение.
-        <br />
-        <strong>Примечание:</strong> Аудио временно отключено из-за проблем с контейнером.
-        <br />
-        <strong>Диагностика:</strong> Если подключение не удается, проверьте что AirPlay активен и окно больше 100x100 пикселей.
-      </div>
-      
       {/* Debug Panel */}
       <DebugPanel />
     </div>

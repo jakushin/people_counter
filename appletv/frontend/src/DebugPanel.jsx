@@ -5,6 +5,9 @@ export default function DebugPanel() {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoggingEnabled, setIsLoggingEnabled] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const messagesEndRef = useRef(null);
   const wsRef = useRef(null);
 
@@ -108,6 +111,58 @@ export default function DebugPanel() {
     }
   };
 
+  // Start debug logging
+  const startDebugLogging = async () => {
+    setIsStarting(true);
+    try {
+      const response = await fetch(`http://${window.location.hostname}:8080/api/debug/start`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setIsLoggingEnabled(true);
+        setError(null);
+      } else {
+        throw new Error('Failed to start debug logging');
+      }
+    } catch (err) {
+      console.error('Failed to start debug logging:', err);
+      setError('Failed to start debug logging: ' + err.message);
+    } finally {
+      setIsStarting(false);
+    }
+  };
+
+  // Stop debug logging
+  const stopDebugLogging = async () => {
+    setIsStopping(true);
+    try {
+      const response = await fetch(`http://${window.location.hostname}:8080/api/debug/stop`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setIsLoggingEnabled(false);
+        setError(null);
+      } else {
+        throw new Error('Failed to stop debug logging');
+      }
+    } catch (err) {
+      console.error('Failed to stop debug logging:', err);
+      setError('Failed to stop debug logging: ' + err.message);
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
   // Clear debug messages
   const clearMessages = () => {
     setMessages([]);
@@ -171,30 +226,78 @@ export default function DebugPanel() {
         fontWeight: 'bold',
         fontSize: '14px'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <span>Debug Console</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              backgroundColor: isConnected ? '#28a745' : '#dc3545'
-            }}></div>
-            <span style={{ 
-              fontSize: '12px', 
-              color: isConnected ? '#28a745' : '#dc3545' 
-            }}>
-              {isConnected ? 'Connected' : 'Disconnected'}
-            </span>
-          </div>
-          {messages.length > 0 && (
-            <span style={{ fontSize: '12px', color: '#6c757d' }}>
-              ({messages.length} messages)
-            </span>
-          )}
-        </div>
+                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+           <span>Debug Console</span>
+           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+             <div style={{
+               width: '8px',
+               height: '8px',
+               borderRadius: '50%',
+               backgroundColor: isConnected ? '#28a745' : '#dc3545'
+             }}></div>
+             <span style={{ 
+               fontSize: '12px', 
+               color: isConnected ? '#28a745' : '#dc3545' 
+             }}>
+               {isConnected ? 'Connected' : 'Disconnected'}
+             </span>
+           </div>
+           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+             <div style={{
+               width: '8px',
+               height: '8px',
+               borderRadius: '50%',
+               backgroundColor: isLoggingEnabled ? '#ffc107' : '#6c757d'
+             }}></div>
+             <span style={{ 
+               fontSize: '12px', 
+               color: isLoggingEnabled ? '#ffc107' : '#6c757d' 
+             }}>
+               {isLoggingEnabled ? 'Logging' : 'Stopped'}
+             </span>
+           </div>
+           {messages.length > 0 && (
+             <span style={{ fontSize: '12px', color: '#6c757d' }}>
+               ({messages.length} messages)
+             </span>
+           )}
+         </div>
         
         <div style={{ display: 'flex', gap: '8px' }}>
+          {!isLoggingEnabled ? (
+            <button
+              onClick={startDebugLogging}
+              disabled={isStarting}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                backgroundColor: isStarting ? '#6c757d' : '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '3px',
+                cursor: isStarting ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isStarting ? 'Starting...' : 'Start Debug'}
+            </button>
+          ) : (
+            <button
+              onClick={stopDebugLogging}
+              disabled={isStopping}
+              style={{
+                padding: '4px 8px',
+                fontSize: '12px',
+                backgroundColor: isStopping ? '#6c757d' : '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '3px',
+                cursor: isStopping ? 'not-allowed' : 'pointer'
+              }}
+            >
+              {isStopping ? 'Stopping...' : 'Stop Debug'}
+            </button>
+          )}
+          
           <button
             onClick={clearMessages}
             disabled={messages.length === 0}
@@ -210,13 +313,14 @@ export default function DebugPanel() {
           >
             Clear
           </button>
+          
           <button
             onClick={saveDebugLog}
             disabled={isSaving || messages.length === 0}
             style={{
               padding: '4px 8px',
               fontSize: '12px',
-              backgroundColor: (isSaving || messages.length === 0) ? '#6c757d' : '#28a745',
+              backgroundColor: (isSaving || messages.length === 0) ? '#6c757d' : '#ffc107',
               color: 'white',
               border: 'none',
               borderRadius: '3px',
@@ -251,16 +355,19 @@ export default function DebugPanel() {
         lineHeight: '1.4',
         backgroundColor: '#ffffff'
       }}>
-        {messages.length === 0 ? (
-          <div style={{ 
-            textAlign: 'center', 
-            color: '#6c757d', 
-            marginTop: '50px',
-            fontSize: '14px'
-          }}>
-            No debug messages yet. Start WebRTC to see live diagnostics.
-          </div>
-        ) : (
+                 {messages.length === 0 ? (
+           <div style={{ 
+             textAlign: 'center', 
+             color: '#6c757d', 
+             marginTop: '50px',
+             fontSize: '14px'
+           }}>
+             {isLoggingEnabled ? 
+               'Debug logging active. Interact with WebRTC to see live diagnostics.' :
+               'Debug logging stopped. Click "Start Debug" to begin logging.'
+             }
+           </div>
+         ) : (
           messages.map((msg, index) => (
             <div key={index} style={{ marginBottom: '2px' }}>
               <span style={{ color: '#6c757d' }}>

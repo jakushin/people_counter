@@ -74,6 +74,7 @@ type DebugLogger struct {
 var (
 	debugLogger *DebugLogger
 	debugLoggerMutex sync.Mutex
+	debugLoggingEnabled bool = false
 )
 
 func initDebugLogger() {
@@ -173,7 +174,7 @@ func (dl *DebugLogger) SaveToFile() error {
 
 // Convenience functions for debug logging
 func debugLog(level, category, event, message string, details ...map[string]interface{}) {
-	if debugLogger == nil {
+	if debugLogger == nil || !debugLoggingEnabled {
 		return
 	}
 	var det map[string]interface{}
@@ -741,6 +742,20 @@ func main() {
 	
 	r := gin.Default()
 	
+	// Add CORS middleware
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+		
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+		
+		c.Next()
+	})
+	
 	// Добавляем middleware для логирования всех запросов
 	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
 		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
@@ -892,6 +907,8 @@ func main() {
 	// Debug API endpoints
 	r.GET("/api/debug/stream", gin.WrapH(http.HandlerFunc(debugStreamHandler)))
 	r.POST("/api/debug/save", gin.WrapH(http.HandlerFunc(debugSaveHandler)))
+	r.POST("/api/debug/start", gin.WrapH(http.HandlerFunc(debugStartHandler)))
+	r.POST("/api/debug/stop", gin.WrapH(http.HandlerFunc(debugStopHandler)))
 
 
 
@@ -2097,6 +2114,36 @@ func debugSaveHandler(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"message": "Debug log saved to debug.txt",
 		"file": "/var/log/appletv/debug.txt",
+		"timestamp": time.Now(),
+	})
+}
+
+func debugStartHandler(w http.ResponseWriter, r *http.Request) {
+	debugLoggingEnabled = true
+	
+	// Send initial message
+	debugInfo("DEBUG", "logging_started", "Debug logging started by user")
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"message": "Debug logging started",
+		"enabled": debugLoggingEnabled,
+		"timestamp": time.Now(),
+	})
+}
+
+func debugStopHandler(w http.ResponseWriter, r *http.Request) {
+	// Send final message before stopping
+	debugInfo("DEBUG", "logging_stopped", "Debug logging stopped by user")
+	
+	debugLoggingEnabled = false
+	
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"message": "Debug logging stopped",
+		"enabled": debugLoggingEnabled,
 		"timestamp": time.Now(),
 	})
 }
