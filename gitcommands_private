@@ -1,0 +1,9 @@
+git reset --hard HEAD
+git clean -fd
+
+
+git clone git@github.com:jakushin/people_counter.git
+
+git reset --soft HEAD~10 && git commit -m "squosh1"
+git fetch origin
+git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
