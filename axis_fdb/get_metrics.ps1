@@ -19,48 +19,13 @@ if (!(Test-Path $ExportDir)) {
     New-Item -ItemType Directory -Path $ExportDir -Force | Out-Null
 }
 
-# Log file for detailed logging - create in the same directory as the script (disabled)
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-# $LogFile = "$ScriptDir\axis_monitoring.log"
-
-# Function for logging (disabled)
-function Write-Log {
-    param([string]$Message)
-    # Logging disabled
-}
-
-# Function for debug logging (disabled)
-function Write-DebugLog {
-    param([string]$Message)
-    # Debug logging disabled
-}
-
-# Create new log file on each run (disabled)
-# Write-Log "=== MONITORING SESSION START ==="
-# Write-Log "PowerShell Version: $($PSVersionTable.PSVersion)"
-# Write-Log "Current Directory: $(Get-Location)"
-# Write-Log "Script Parameters:"
-# Write-Log "  SourceDir: $SourceDir"
-# Write-Log "  TempDir: $TempDir"
-# Write-Log "  ExportDir: $ExportDir"
-# Write-Log "  FirebirdPath: $FirebirdPath"
-
 # Function for cleaning temp files
-function Cleanup-TempFiles {
-    # Write-Log "Cleaning temp files..."
+function Remove-TempFiles {
     if (Test-Path "$TempDir\ACS.FDB") {
-        # Write-DebugLog "Removing temp file: $TempDir\ACS.FDB"
         Remove-Item "$TempDir\ACS.FDB" -Force
-        # Write-DebugLog "ACS.FDB file removed"
-    } else {
-        # Write-DebugLog "Temp ACS.FDB file not found"
     }
     if (Test-Path "$TempDir\ACS_RECORDINGS.FDB") {
-        # Write-DebugLog "Removing temp file: $TempDir\ACS_RECORDINGS.FDB"
         Remove-Item "$TempDir\ACS_RECORDINGS.FDB" -Force
-        # Write-DebugLog "ACS_RECORDINGS.FDB file removed"
-    } else {
-        # Write-DebugLog "Temp ACS_RECORDINGS.FDB file not found"
     }
 }
 
@@ -72,26 +37,15 @@ function Invoke-FirebirdQuery {
         [string]$Username = "SYSDBA",
         [string]$Password = "masterkey"
     )
-    # Write-DebugLog "Executing SQL query to database: $Database"
-    # Write-DebugLog "User: $Username"
-    # Write-DebugLog "isql path: $FirebirdPath"
-    # Write-DebugLog "SQL query: $Query"
     try {
         $tempFile = [System.IO.Path]::GetTempFileName()
-        # Write-DebugLog "Created temp SQL file: $tempFile"
         $Query | Out-File -FilePath $tempFile -Encoding ASCII
-        # Write-DebugLog "SQL query written to file"
-        # Write-DebugLog "Starting isql command (direct path)..."
         $absolutePath = [System.IO.Path]::GetFullPath($Database)
         $result = & $FirebirdPath -u $Username -p $Password -i $tempFile $absolutePath 2>&1
-        # Write-DebugLog "isql command completed"
         Remove-Item $tempFile -Force
-        # Write-DebugLog "Temp SQL file removed"
         return $result
     }
     catch {
-        # Write-Log "SQL query execution error: $($_.Exception.Message)"
-        # Write-DebugLog "Error details: $($_.Exception.ToString())"
         return $null
     }
 }
@@ -100,8 +54,6 @@ function Invoke-FirebirdQuery {
 function Get-CameraName {
     param([int]$CameraId)
     
-    # Write-DebugLog "Getting camera name for ID: $CameraId"
-    
     $query = @"
 SELECT NAME FROM CAMERA WHERE ID = $CameraId;
 "@
@@ -109,286 +61,47 @@ SELECT NAME FROM CAMERA WHERE ID = $CameraId;
     $result = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $query
     
     if ($result -and $result.Count -gt 0) {
-        # Write-DebugLog "Got result for camera $CameraId, lines: $($result.Count)"
-        # Extract camera name from result
         foreach ($line in $result) {
-            # Write-DebugLog "Processing line: '$line'"
             if ($line -match '^\s*(\S+)\s*$' -and $line.Trim() -ne 'NAME') {
                 $cameraName = $matches[1].Trim()
-                # Write-DebugLog "Found camera name: $cameraName"
                 return $cameraName
             }
         }
-        # Write-DebugLog "Camera name not found in result"
-    } else {
-        # Write-DebugLog "Empty result for camera $CameraId"
     }
     
     $unknownName = "Unknown_Camera_$CameraId"
-    # Write-DebugLog "Returning unknown name: $unknownName"
     return $unknownName
 }
 
 # Function for environment testing
 function Test-Environment {
-    # Write-Log "=== ENVIRONMENT TESTING ==="
-    
-    # PowerShell testing
-    $executionPolicy = Get-ExecutionPolicy
-    $policyOk = $executionPolicy -in @("RemoteSigned", "Unrestricted", "Bypass")
-    # Write-Log "PowerShell Execution Policy: $executionPolicy $(if ($policyOk) { '(OK)' } else { '(WARNING)' })"
-    
-    $psVersion = $PSVersionTable.PSVersion
-    # Write-Log "PowerShell Version: $psVersion"
-    
-    # Firebird testing
-    $firebirdExists = Test-Path $FirebirdPath
-    # Write-Log "Firebird isql.exe: $(if ($firebirdExists) { 'Found' } else { 'NOT FOUND' }) - $FirebirdPath"
-    
-    if ($firebirdExists) {
-        try {
-            $job = Start-Job -ScriptBlock { 
-                param($path)
-                & $path -z 2>$null
-            } -ArgumentList $FirebirdPath
-            
-            $version = Wait-Job -Job $job -Timeout 10
-            if ($version) {
-                $result = Receive-Job -Job $job
-                Remove-Job -Job $job
-                # Write-Log "Firebird Version: $result"
-            } else {
-                Remove-Job -Job $job -Force
-                # Write-Log "Firebird Version: Timeout (10s)"
-            }
-        }
-        catch {
-            # Write-Log "Firebird Version: Error getting version"
-        }
-    }
-    
-    # Directory testing
-    $tempExists = Test-Path $TempDir
-    # Write-Log "Temp Directory: $(if ($tempExists) { 'Exists' } else { 'Missing' }) - $TempDir"
-    
-    $exportExists = Test-Path $ExportDir
-    # Write-Log "Export Directory: $(if ($exportExists) { 'Exists' } else { 'Missing' }) - $ExportDir"
-    
     # Create directories if needed
     if (!(Test-Path $TempDir)) {
         New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
-        # Write-Log "Created Temp Directory: $TempDir"
     }
     
     if (!(Test-Path $ExportDir)) {
         New-Item -ItemType Directory -Path $ExportDir -Force | Out-Null
-        # Write-Log "Created Export Directory: $ExportDir"
     }
 }
 
 # Function for database testing
 function Test-Databases {
-    # Write-Log "=== DATABASE TESTING ==="
-    
     $acsSourcePath = "$SourceDir\ACS.FDB"
     $recordingsSourcePath = "$SourceDir\ACS_RECORDINGS.FDB"
     
     # Check source files existence
     $acsExists = Test-Path $acsSourcePath
-    # Write-Log "ACS.FDB Source: $(if ($acsExists) { 'Found' } else { 'NOT FOUND' }) - $acsSourcePath"
-    
     $recordingsExists = Test-Path $recordingsSourcePath
-    # Write-Log "ACS_RECORDINGS.FDB Source: $(if ($recordingsExists) { 'Found' } else { 'NOT FOUND' }) - $recordingsSourcePath"
-    
-    if ($acsExists) {
-        $acsSize = (Get-Item $acsSourcePath).Length
-        # Write-Log "ACS.FDB Size: $($acsSize / 1MB) MB"
-    }
-    
-    if ($recordingsExists) {
-        $recordingsSize = (Get-Item $recordingsSourcePath).Length
-        # Write-Log "ACS_RECORDINGS.FDB Size: $($recordingsSize / 1MB) MB"
-    }
     
     return $acsExists -and $recordingsExists
 }
 
-# Function for testing database access
-function Test-DatabaseAccess {
-    # Write-Log "=== DATABASE ACCESS TESTING ==="
-    
-    $testResults = @{}
-    
-    # Test ACS.FDB
-    # Write-Log "Testing ACS.FDB access..."
-    try {
-        # Test copying
-        $copySuccess = $false
-        try {
-            Copy-Item "$SourceDir\ACS.FDB" "$TempDir\ACS.FDB" -Force
-            $copySuccess = Test-Path "$TempDir\ACS.FDB"
-        }
-        catch {
-            Write-Log "ACS.FDB Copy: FAILED - File is locked by Axis Camera Station"
-            $testResults["ACS_FDB"] = $false
-            return $testResults
-        }
-        
-        if (-not $copySuccess) {
-            Write-Log "ACS.FDB Copy: FAILED - Failed to copy database file"
-            $testResults["ACS_FDB"] = $false
-            return $testResults
-        }
-        
-        # Write-Log "ACS.FDB Copy: SUCCESS"
-        
-        # Test connection
-        $query = "SELECT COUNT(*) FROM CAMERA;"
-        $tempFile = [System.IO.Path]::GetTempFileName()
-        $query | Out-File -FilePath $tempFile -Encoding ASCII
-        
-        $job = Start-Job -ScriptBlock { param($path, $queryFile, $dbFile) $result = & $path -u SYSDBA -p masterkey -i $queryFile $dbFile 2>&1; return $result } -ArgumentList $FirebirdPath, $tempFile, "$TempDir\ACS.FDB"
-        
-        $result = Wait-Job -Job $job -Timeout 15
-        if ($result) {
-            $output = Receive-Job -Job $job
-            Remove-Job -Job $job
-            
-            if ($output -and $output.Count -gt 0) {
-                Write-Log "ACS.FDB Query output:"
-                for ($i = 0; $i -lt [Math]::Min(10, $output.Count); $i++) {
-                    Write-Log "  [$i]: '$($output[$i])'"
-                }
-                
-                $found = $false
-                foreach ($line in $output) {
-                    $str = $line.ToString()
-                    if ($str -match '^\s*(\d+)\s*$') {
-                        $count = $matches[1]
-                        Write-Log "ACS.FDB Connection: SUCCESS - Cameras found: $count"
-                        $testResults["ACS_FDB"] = $true
-                        $found = $true
-                        break
-                    }
-                    elseif ($str -match '^\s*COUNT\s+(\d+)\s*$') {
-                        $count = $matches[1]
-                        Write-Log "ACS.FDB Connection: SUCCESS - Cameras found: $count"
-                        $testResults["ACS_FDB"] = $true
-                        $found = $true
-                        break
-                    }
-                }
-                if (-not $found) {
-                    $debugOutput = $output[0..2] -join ' | '
-                    Write-Log "ACS.FDB Connection: SUCCESS - Connection working (debug: $debugOutput)"
-                    $testResults["ACS_FDB"] = $true
-                }
-            } else {
-                Write-Log "ACS.FDB Connection: FAILED - No output from query"
-                $testResults["ACS_FDB"] = $false
-            }
-        } else {
-            Remove-Job -Job $job -Force
-            Write-Log "ACS.FDB Connection: FAILED - Connection timeout (15s)"
-            $testResults["ACS_FDB"] = $false
-        }
-        
-        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-        Remove-Item "$TempDir\ACS.FDB" -Force -ErrorAction SilentlyContinue
-    }
-    catch {
-        Write-Log "ACS.FDB Test: FAILED - $($_.Exception.Message)"
-        $testResults["ACS_FDB"] = $false
-    }
-    
-    # Test ACS_RECORDINGS.FDB
-    # Write-Log "Testing ACS_RECORDINGS.FDB access..."
-    try {
-        # Test copying
-        $copySuccess = $false
-        try {
-            Copy-Item "$SourceDir\ACS_RECORDINGS.FDB" "$TempDir\ACS_RECORDINGS.FDB" -Force
-            $copySuccess = Test-Path "$TempDir\ACS_RECORDINGS.FDB"
-        }
-        catch {
-            Write-Log "ACS_RECORDINGS.FDB Copy: FAILED - File is locked by Axis Camera Station"
-            $testResults["ACS_RECORDINGS_FDB"] = $false
-            return $testResults
-        }
-        
-        if (-not $copySuccess) {
-            Write-Log "ACS_RECORDINGS.FDB Copy: FAILED - Failed to copy database file"
-            $testResults["ACS_RECORDINGS_FDB"] = $false
-            return $testResults
-        }
-        
-        # Write-Log "ACS_RECORDINGS.FDB Copy: SUCCESS"
-        
-        # Test connection
-        $query = "SELECT COUNT(*) FROM RECORDING;"
-        $tempFile = [System.IO.Path]::GetTempFileName()
-        $query | Out-File -FilePath $tempFile -Encoding ASCII
-        
-        $job = Start-Job -ScriptBlock { param($path, $queryFile, $dbFile) $result = & $path -u SYSDBA -p masterkey -i $queryFile $dbFile 2>&1; return $result } -ArgumentList $FirebirdPath, $tempFile, "$TempDir\ACS_RECORDINGS.FDB"
-        
-        $result = Wait-Job -Job $job -Timeout 15
-        if ($result) {
-            $output = Receive-Job -Job $job
-            Remove-Job -Job $job
-            
-            if ($output -and $output.Count -gt 0) {
-                Write-Log "ACS_RECORDINGS.FDB Query output:"
-                for ($i = 0; $i -lt [Math]::Min(10, $output.Count); $i++) {
-                    Write-Log "  [$i]: '$($output[$i])'"
-                }
-                
-                $found = $false
-                foreach ($line in $output) {
-                    $str = $line.ToString()
-                    if ($str -match '^\s*(\d+)\s*$') {
-                        $count = $matches[1]
-                        Write-Log "ACS_RECORDINGS.FDB Connection: SUCCESS - Records found: $count"
-                        $testResults["ACS_RECORDINGS_FDB"] = $true
-                        $found = $true
-                        break
-                    }
-                    elseif ($str -match '^\s*COUNT\s+(\d+)\s*$') {
-                        $count = $matches[1]
-                        Write-Log "ACS_RECORDINGS.FDB Connection: SUCCESS - Records found: $count"
-                        $testResults["ACS_RECORDINGS_FDB"] = $true
-                        $found = $true
-                        break
-                    }
-                }
-                if (-not $found) {
-                    $debugOutput = $output[0..2] -join ' | '
-                    Write-Log "ACS_RECORDINGS.FDB Connection: SUCCESS - Connection working (debug: $debugOutput)"
-                    $testResults["ACS_RECORDINGS_FDB"] = $true
-                }
-            } else {
-                Write-Log "ACS_RECORDINGS.FDB Connection: FAILED - No output from query"
-                $testResults["ACS_RECORDINGS_FDB"] = $false
-            }
-        } else {
-            Remove-Job -Job $job -Force
-            Write-Log "ACS_RECORDINGS.FDB Connection: FAILED - Connection timeout (15s)"
-            $testResults["ACS_RECORDINGS_FDB"] = $false
-        }
-        
-        Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
-        Remove-Item "$TempDir\ACS_RECORDINGS.FDB" -Force -ErrorAction SilentlyContinue
-    }
-    catch {
-        Write-Log "ACS_RECORDINGS.FDB Test: FAILED - $($_.Exception.Message)"
-        $testResults["ACS_RECORDINGS_FDB"] = $false
-    }
-    
-    return $testResults
-}
+
 
 # Main monitoring function
 function Start-AxisMonitoring {
-    Write-Log "Starting Axis Camera Station monitoring..."
+    
     
     try {
         # 1. Environment testing
@@ -400,26 +113,16 @@ function Start-AxisMonitoring {
             throw "Databases not found"
         }
         
-        # 3. Database access testing
-        $testResults = Test-DatabaseAccess
-        if (-not $testResults["ACS_FDB"] -or -not $testResults["ACS_RECORDINGS_FDB"]) {
-            # Write-Log "WARNING: Some database access tests failed"
-            Write-Log "Continuing execution, but there may be issues..."
-        }
+
         
         # 4. Copy databases for analysis
-        # Write-Log "Copying databases..."
         Copy-Item "$SourceDir\ACS.FDB" "$TempDir\ACS.FDB" -Force
         Copy-Item "$SourceDir\ACS_RECORDINGS.FDB" "$TempDir\ACS_RECORDINGS.FDB" -Force
         
         # 5. Analyze metrics
-        Write-Log "Analyzing metrics..."
         
         # Check Firebird availability
-        Write-DebugLog "Checking Firebird availability..."
         if (!(Test-Path $FirebirdPath)) {
-            Write-Log "ERROR: Firebird isql.exe not found at: $FirebirdPath"
-            Write-DebugLog "Searching for alternative paths..."
             $possiblePaths = @(
                 "C:\Program Files\Firebird\Firebird_3_0\isql.exe",
                 "C:\Program Files (x86)\Firebird\Firebird_3_0\isql.exe",
@@ -428,7 +131,6 @@ function Start-AxisMonitoring {
             
             foreach ($path in $possiblePaths) {
                 if (Test-Path $path) {
-                    Write-Log "Found Firebird at: $path"
                     $FirebirdPath = $path
                     break
                 }
@@ -440,19 +142,8 @@ function Start-AxisMonitoring {
         }
         
         # Get total recordings count
-        Write-DebugLog "Getting total recordings count..."
         $totalRecordingsQuery = "SELECT COUNT(*) FROM RECORDING;"
         $totalRecordingsResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $totalRecordingsQuery
-        
-        Write-Log "Total recordings query result:"
-        if ($totalRecordingsResult) {
-            Write-Log "Result lines: $($totalRecordingsResult.Count)"
-            for ($i = 0; $i -lt [Math]::Min(10, $totalRecordingsResult.Count); $i++) {
-                Write-Log "  [$i]: '$($totalRecordingsResult[$i])'"
-            }
-        } else {
-            Write-Log "  No result returned"
-        }
         
         $totalRecordings = 0
         if ($totalRecordingsResult -and $totalRecordingsResult.Count -gt 0) {
@@ -460,59 +151,43 @@ function Start-AxisMonitoring {
                 $str = $line.ToString()
                 if ($str -match '^\s*(\d+)\s*$') {
                     $totalRecordings = [int]$str.Trim()
-                    Write-DebugLog "Total recordings: $totalRecordings"
                     break
                 }
                 # Try other patterns
                 elseif ($str -match '^\s*COUNT\s+(\d+)\s*$') {
                     $totalRecordings = [int]$str.Trim()
-                    Write-DebugLog "Total recordings (with COUNT): $totalRecordings"
                     break
                 }
                 elseif ($str -match '^\s*(\d+)\s*$' -and $str.Trim() -ne '') {
                     $totalRecordings = [int]$str.Trim()
-                    Write-DebugLog "Total recordings (trimmed): $totalRecordings"
                     break
                 }
             }
         }
         
-        if ($totalRecordings -eq 0) {
-            # Write-Log "WARNING: No recordings found in database"
-        } else {
-            Write-Log "SUCCESS: Found $totalRecordings recordings"
-        }
-        
         # Initialize variables for oldest recording
-        $oldestRecording = $null
         $oldestCameraName = "Unknown"
         $oldestCameraId = 0
         $oldestTimestamp = 0
         
         # Get newest recording
-        Write-DebugLog "Getting newest recording..."
         $newestRecordingQuery = "SELECT FIRST 1 START_TIME FROM RECORDING_FILE ORDER BY START_TIME DESC;"
         $newestRecordingResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $newestRecordingQuery
         
-        $newestRecording = $null
         if ($newestRecordingResult -and $newestRecordingResult.Count -gt 0) {
-            Write-DebugLog "Newest recording result: $($newestRecordingResult -join ' | ')"
             foreach ($line in $newestRecordingResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing newest recording line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $newestTimestampTicks = [long]$str.Trim()
                     # Конвертируем ticks в Unix timestamp (секунды)
                     $newestTimestamp = [long]($newestTimestampTicks / 10000000 - 62135596800)
-                    Write-DebugLog "Found newest recording at ticks $newestTimestampTicks, unix $newestTimestamp"
                     break
                 }
             }
         }
         
         # Get unique cameras count
-        Write-DebugLog "Getting unique cameras count..."
         $uniqueCamerasQuery = "SELECT COUNT(DISTINCT CAMERA_ID) FROM RECORDING;"
         $uniqueCamerasResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $uniqueCamerasQuery
         
@@ -522,7 +197,6 @@ function Start-AxisMonitoring {
                 $str = $line.ToString()
                 if ($str -match '^\s*(\d+)\s*$') {
                     $uniqueCameras = [int]$str.Trim()
-                    Write-DebugLog "Unique cameras: $uniqueCameras"
                     break
                 }
             }
@@ -532,7 +206,6 @@ function Start-AxisMonitoring {
         if (-not $oldestTimestamp) {
             $oldestTimestamp = 0
         }
-        $newestTimestamp = 0
         
         # Current timestamp
         $currentTimestamp = [long]([DateTime]::Now - [DateTime]::new(1970, 1, 1)).TotalSeconds
@@ -541,32 +214,25 @@ function Start-AxisMonitoring {
         $cameraList = @{}
         $cameraQuery = "SELECT ID, NAME FROM CAMERA;"
         $cameraResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $cameraQuery
-        Write-DebugLog "Camera query result: $($cameraResult -join ' | ')"
         if ($cameraResult) {
             foreach ($line in $cameraResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing camera line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(.+?)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $cid = $matches[1]
                     $cname = $matches[2].Trim()
                     $cameraList[$cid] = $cname
-                    Write-DebugLog "Found camera $cid with name '$cname'"
                 }
             }
         }
-        Write-DebugLog "Cameras found: $($cameraList.Count)"
 
         # Get storage list
-        Write-DebugLog "Getting storage list..."
         $storageQuery = "SELECT STORAGE_ID, ROOT_PATH, RECORDING_DIRECTORY FROM STORAGE_LOCAL_DISK;"
         $storageResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $storageQuery
-        Write-DebugLog "Storage query result: $($storageResult -join ' | ')"
         $storageList = @{}
         if ($storageResult) {
             foreach ($line in $storageResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing storage line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(.+?)\s+(.+?)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $sid = $matches[1]
@@ -574,14 +240,11 @@ function Start-AxisMonitoring {
                     $recordingDir = $matches[3].Trim()
                     $storageName = "$rootPath$recordingDir"
                     $storageList[$sid] = $storageName
-                    Write-DebugLog "Found storage $sid with name '$storageName'"
                 }
             }
         }
-        Write-DebugLog "Storages found: $($storageList.Count)"
 
         # Get oldest recording with camera name (after camera list is populated)
-        Write-DebugLog "Getting oldest recording..."
         $oldestRecordingQuery = @"
 SELECT FIRST 1 
     RF.CAMERA_ID,
@@ -593,18 +256,14 @@ ORDER BY RF.START_TIME ASC;
         $oldestRecordingResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $oldestRecordingQuery
         
         if ($oldestRecordingResult -and $oldestRecordingResult.Count -gt 0) {
-            Write-DebugLog "Processing oldest recording result..."
-            Write-DebugLog "Oldest recording result: $($oldestRecordingResult -join ' | ')"
             foreach ($line in $oldestRecordingResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing oldest recording line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $oldestCameraId = [int]$matches[1]
                     $oldestTimestampTicks = [long]$matches[2]
                     # Конвертируем ticks в Unix timestamp (секунды)
                     $oldestTimestamp = [long]($oldestTimestampTicks / 10000000 - 62135596800)
-                    Write-DebugLog "Found oldest recording: Camera $oldestCameraId at ticks $oldestTimestampTicks, unix $oldestTimestamp (getting name separately)"
                     $oldestCameraName = $cameraList[$oldestCameraId]
                     if (-not $oldestCameraName) {
                         $oldestCameraName = "Unknown"
@@ -618,14 +277,11 @@ ORDER BY RF.START_TIME ASC;
         $enabledCameras = 0
         $enabledQuery = "SELECT COUNT(*) FROM CAMERA WHERE IS_ENABLED = TRUE;"
         $enabledResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $enabledQuery
-        Write-DebugLog "Enabled cameras query result: $($enabledResult -join ' | ')"
         if ($enabledResult) {
             foreach ($line in $enabledResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing enabled cameras line: '$str'"
                 if ($str -match '^\s*\d+\s*$') { 
                     $enabledCameras = [int]$str.Trim(); 
-                    Write-DebugLog "Found enabled cameras: $enabledCameras"
                     break 
                 }
             }
@@ -635,14 +291,11 @@ ORDER BY RF.START_TIME ASC;
         $disabledCameras = 0
         $disabledQuery = "SELECT COUNT(*) FROM CAMERA WHERE IS_ENABLED = FALSE;"
         $disabledResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $disabledQuery
-        Write-DebugLog "Disabled cameras query result: $($disabledResult -join ' | ')"
         if ($disabledResult) {
             foreach ($line in $disabledResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing disabled cameras line: '$str'"
                 if ($str -match '^\s*\d+\s*$') { 
                     $disabledCameras = [int]$str.Trim(); 
-                    Write-DebugLog "Found disabled cameras: $disabledCameras"
                     break 
                 }
             }
@@ -652,14 +305,11 @@ ORDER BY RF.START_TIME ASC;
         $totalStorage = 0
         $totalStorageQuery = "SELECT SUM(STORAGE_SIZE) AS TOTAL_SIZE FROM RECORDING_FILE;"
         $totalStorageResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $totalStorageQuery
-        Write-DebugLog "Total storage query result: $($totalStorageResult -join ' | ')"
         if ($totalStorageResult) {
             foreach ($line in $totalStorageResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing total storage line: '$str'"
                 if ($str -match '^\s*\d+\s*$') { 
                     $totalStorage = [long]$str.Trim(); 
-                    Write-DebugLog "Found total storage: $totalStorage"
                     break 
                 }
             }
@@ -669,169 +319,74 @@ ORDER BY RF.START_TIME ASC;
         $cameraStorage = @{}
         $cameraStorageQuery = "SELECT CAMERA_ID, SUM(STORAGE_SIZE) AS CAMERA_SIZE FROM RECORDING_FILE GROUP BY CAMERA_ID;"
         $cameraStorageResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $cameraStorageQuery
-        Write-DebugLog "Camera storage query result: $($cameraStorageResult -join ' | ')"
         if ($cameraStorageResult) {
             foreach ($line in $cameraStorageResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing camera storage line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $cid = $matches[1]
                     $size = [long]$matches[2]
                     $cameraStorage[$cid] = $size
-                    Write-DebugLog "Found camera $cid with storage $size"
                 }
             }
         }
-        Write-DebugLog "Camera storage found: $($cameraStorage.Count)"
 
         # Количество записей на камеру
         $recordingsPerCamera = @{}
         $recordingsPerCameraQuery = "SELECT CAMERA_ID, COUNT(*) as recording_count FROM RECORDING GROUP BY CAMERA_ID;"
         $recordingsPerCameraResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $recordingsPerCameraQuery
-        Write-DebugLog "Recordings per camera query result: $($recordingsPerCameraResult -join ' | ')"
         if ($recordingsPerCameraResult) {
             foreach ($line in $recordingsPerCameraResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $cid = $matches[1]
                     $count = [int]$matches[2]
                     $recordingsPerCamera[$cid] = $count
-                    Write-DebugLog "Found camera $cid with $count recordings"
                 }
             }
         }
-        Write-DebugLog "Recordings per camera found: $($recordingsPerCamera.Count)"
-
-        # Количество незавершенных записей
-        $incompleteRecordings = 0
-        $incompleteQuery = "SELECT COUNT(*) FROM RECORDING_FILE WHERE IS_COMPLETE = FALSE;"
-        $incompleteResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $incompleteQuery
-        Write-DebugLog "Incomplete recordings query result: $($incompleteResult -join ' | ')"
-        if ($incompleteResult) {
-            foreach ($line in $incompleteResult) {
-                $str = $line.ToString()
-                Write-DebugLog "Processing incomplete recordings line: '$str'"
-                if ($str -match '^\s*\d+\s*$') { 
-                    $incompleteRecordings = [int]$str.Trim(); 
-                    Write-DebugLog "Found incomplete recordings: $incompleteRecordings"
-                    break 
-                }
-            }
-        }
-
-        # Средний размер записи
-        $avgRecordingSize = 0
-        $avgSizeQuery = "SELECT COALESCE(AVG(STORAGE_SIZE), 0) FROM RECORDING_FILE WHERE IS_COMPLETE = TRUE;"
-        $avgSizeResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $avgSizeQuery
-        Write-DebugLog "Average size query result: $($avgSizeResult -join ' | ')"
-        if ($avgSizeResult) {
-            foreach ($line in $avgSizeResult) {
-                $str = $line.ToString()
-                Write-DebugLog "Processing avg size line: '$str'"
-                if ($str -match '^\s*\d+\s*$') { 
-                    $avgRecordingSize = [long]$str.Trim(); 
-                    Write-DebugLog "Found average size: $avgRecordingSize"
-                    break 
-                }
-            }
-        }
-
-        # Средняя длительность записи
-        $avgRecordingDuration = 0
-        $avgDurationQuery = "SELECT COALESCE(AVG(STOP_TIME - START_TIME), 0) FROM RECORDING_FILE WHERE IS_COMPLETE = TRUE AND STOP_TIME > START_TIME;"
-        $avgDurationResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $avgDurationQuery
-        Write-DebugLog "Average duration query result: $($avgDurationResult -join ' | ')"
-        if ($avgDurationResult) {
-            foreach ($line in $avgDurationResult) {
-                $str = $line.ToString()
-                Write-DebugLog "Processing average duration line: '$str'"
-                if ($str -match '^\s*\d+\s*$') { 
-                    $avgRecordingDuration = [long]$str.Trim(); 
-                    Write-DebugLog "Found average duration: $avgRecordingDuration"
-                    break 
-                }
-            }
-        }
-
-        # События по категориям
-        $eventsByCategory = @{}
-        $eventsQuery = @"
-SELECT ec.NAME, COUNT(rfec.RECORDING_FILE_ID) as event_count 
-FROM EVENT_CATEGORY ec 
-LEFT JOIN RECORDING_FILE_EVENT_CATEGORY rfec ON ec.ID = rfec.EVENT_CATEGORY_ID 
-GROUP BY ec.ID, ec.NAME;
-"@
-        $eventsResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $eventsQuery
-        Write-DebugLog "Events query result: $($eventsResult -join ' | ')"
-        Write-DebugLog "Events result count: $($eventsResult.Count)"
-        if ($eventsResult) {
-            foreach ($line in $eventsResult) {
-                $str = $line.ToString()
-                Write-DebugLog "Processing events line: '$str'"
-                # Пропускаем заголовки и разделители, парсим только строки с данными
-                if ($str -match '^\s*(.+?)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
-                    $category = $matches[1].Trim()
-                    $count = [int]$matches[2]
-                    $eventsByCategory[$category] = $count
-                    Write-DebugLog "Found category '$category' with $count events"
-                }
-            }
-        }
-        Write-DebugLog "Events categories found: $($eventsByCategory.Count)"
 
         # Записи по хранилищам
         $recordingsByStorage = @{}
         $storageRecordingsQuery = "SELECT STORAGE_ID, COUNT(*) as recording_count FROM RECORDING_FILE GROUP BY STORAGE_ID;"
         $storageRecordingsResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $storageRecordingsQuery
-        Write-DebugLog "Storage recordings query result: $($storageRecordingsResult -join ' | ')"
         if ($storageRecordingsResult) {
             foreach ($line in $storageRecordingsResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing storage recordings line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $storageId = $matches[1]
                     $count = [int]$matches[2]
                     $recordingsByStorage[$storageId] = $count
-                    Write-DebugLog "Found storage $storageId with $count recordings"
                 }
             }
         }
-        Write-DebugLog "Storage recordings found: $($recordingsByStorage.Count)"
 
         # Размер по хранилищам
         $storageByStorage = @{}
         $storageSizeQuery = "SELECT STORAGE_ID, COALESCE(SUM(STORAGE_SIZE), 0) as storage_size FROM RECORDING_FILE GROUP BY STORAGE_ID;"
         $storageSizeResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $storageSizeQuery
-        Write-DebugLog "Storage size query result: $($storageSizeResult -join ' | ')"
         if ($storageSizeResult) {
             foreach ($line in $storageSizeResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing storage size line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $storageId = $matches[1]
                     $size = [long]$matches[2]
                     $storageByStorage[$storageId] = $size
-                    Write-DebugLog "Found storage $storageId with size $size"
                 }
             }
         }
-        Write-DebugLog "Storage sizes found: $($storageByStorage.Count)"
 
         # Дата последней записи по каждой камере (ticks и unix)
         $lastStopTimes = @{}
         $lastStartTimes = @{}
         $lastTimeQuery = "SELECT CAMERA_ID, MAX(STOP_TIME) AS LAST_STOP_TIME, MAX(START_TIME) AS LAST_START_TIME FROM RECORDING_FILE GROUP BY CAMERA_ID;"
         $lastTimeResult = Invoke-FirebirdQuery -Database "$TempDir\ACS_RECORDINGS.FDB" -Query $lastTimeQuery
-        Write-DebugLog "Last time query result: $($lastTimeResult -join ' | ')"
         if ($lastTimeResult) {
             foreach ($line in $lastTimeResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing last time line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $cid = $matches[1]
@@ -839,48 +394,280 @@ GROUP BY ec.ID, ec.NAME;
                     $startTicks = [long]$matches[3]
                     $lastStopTimes[$cid] = $stopTicks
                     $lastStartTimes[$cid] = $startTicks
-                    Write-DebugLog "Found camera $cid with stop time $stopTicks and start time $startTicks"
                 }
             }
         }
-        Write-DebugLog "Last times found: $($lastStopTimes.Count)"
 
         # Retention time per camera
         $retentionByCamera = @{}
         $retentionQuery = "SELECT CAMERA_ID, KEEP_TIME FROM CAMERA_STORAGE;"
         $retentionResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $retentionQuery
-        Write-DebugLog "Retention query result: $($retentionResult -join ' | ')"
         if ($retentionResult) {
             foreach ($line in $retentionResult) {
                 $str = $line.ToString()
-                Write-DebugLog "Processing retention line: '$str'"
                 # Пропускаем заголовки и разделители, парсим только строки с данными
                 if ($str -match '^\s*(\d+)\s+<null>\s*$' -or $str -match '([0-9]+).*<null>') {
                     $cid = $matches[1]
                     $retentionByCamera[$cid] = -1
-                    Write-DebugLog "Found camera $cid with unlimited retention (NULL in DB)"
                 } elseif ($str -match '^[\s\t]*(\d+)[\s\t]+(\d+)[\s\t]*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
                     $cid = $matches[1]
                     $keepTimeTicks = [long]$matches[2]
                     $retentionDays = [long]($keepTimeTicks / 864000000000)
                     $retentionByCamera[$cid] = $retentionDays
-                    Write-DebugLog "Found camera $cid with retention $retentionDays days (ticks: $keepTimeTicks)"
                 } else {
                     # Дополнительная отладка для строк, которые не попадают в регулярки
                     if ($str -match '^\s*\d+\s+\d+\s*$') {
-                        Write-DebugLog "DEBUG: String matches basic pattern but not detailed: '$str'"
+                        # DEBUG: String matches basic pattern but not detailed: '$str'
                     } elseif ($str -match '^\s*\d+\s+<null>\s*$') {
-                        Write-DebugLog "DEBUG: String matches null pattern but not detailed: '$str'"
+                        # DEBUG: String matches null pattern but not detailed: '$str'
                     } else {
-                        Write-DebugLog "DEBUG: String doesn't match any retention pattern: '$str'"
+                        # DEBUG: String doesn't match any retention pattern: '$str'
                     }
                 }
             }
         }
-        Write-DebugLog "Retention times found: $($retentionByCamera.Count)"
+
+        # HTTPS статус по камерам
+        $httpsStatusByCamera = @{}
+        $httpsStatusQuery = @"
+SELECT c.ID, c.NAME, d.HOSTNAME, dcs.IS_HTTPS_ENABLED 
+FROM CAMERA c 
+JOIN DEVICE d ON c.DEVICE_ID = d.ID 
+JOIN DEVICE_CERTIFICATE_SETTINGS dcs ON d.ID = dcs.DEVICE_ID
+ORDER BY c.ID;
+"@
+        $httpsStatusResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $httpsStatusQuery
+        if ($httpsStatusResult) {
+            foreach ($line in $httpsStatusResult) {
+                $str = $line.ToString()
+                # Пропускаем заголовки и разделители, парсим только строки с данными
+                if ($str -match '^\s*(\d+)\s+(.+?)\s+(.+?)\s+(.+?)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
+                    $parts = $str -split '\s+'
+                    $parts = $parts | Where-Object { $_ -ne "" }
+                    if ($parts.Count -ge 4) {
+                        $cid = $parts[0]
+                        $httpsEnabled = $parts[-1]  # Последнее поле - HTTPS статус
+                        $hostname = $parts[-2]      # Предпоследнее поле - hostname
+                        $cname = ($parts[1..($parts.Count-3)] -join " ").Trim()  # Все поля между ID и hostname
+                        
+                        # Конвертируем <true>/<false> в 1/0
+                        $httpsValue = if ($httpsEnabled -eq "<true>") { 1 } else { 0 }
+                        $httpsStatusByCamera[$cid] = @{
+                            CameraName = $cname
+                            Hostname = $hostname
+                            HttpsEnabled = $httpsValue
+                        }
+                    }
+                }
+            }
+        }
+
+        # NTP DHCP статус по камерам
+        $ntpDhcpStatusByCamera = @{}
+        $ntpDhcpQuery = @"
+SELECT c.ID,
+       IIF(dts.SERVER_AS_PRIMARY_NTP, 0, 1) AS NTP_DHCP
+FROM CAMERA c
+JOIN DEVICE d ON c.DEVICE_ID = d.ID
+JOIN DEVICE_TIME_SETTINGS dts ON dts.DEVICE_ID = d.ID;
+"@
+        $ntpDhcpResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $ntpDhcpQuery
+        if ($ntpDhcpResult) {
+            foreach ($line in $ntpDhcpResult) {
+                $str = $line.ToString()
+                if ($str -match '^\s*(\d+)\s+(\d+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
+                    $cid = $matches[1]
+                    $dhcpVal = [int]$matches[2]
+                    $ntpDhcpStatusByCamera[$cid] = $dhcpVal
+                }
+            }
+        }
+
+        # Лицензионный статус и дата создания камер
+        $licenseStatusByCamera = @{}
+        $cameraCreationByCamera = @{}
+
+        # Получаем JSON с лицензиями из KEY_VALUE
+        # --- LICENSE JSON PARSING ---
+        $licenseJsonQuery = @"
+SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
+"@
+        $licenseJsonResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $licenseJsonQuery
+
+        $licenseStatusByMac = @{}
+        if ($licenseJsonResult) {
+            foreach ($line in $licenseJsonResult) {
+                $str = $line.ToString()
+                # Try to extract JSON from the line
+                $jsonStart = $str.IndexOf('{')
+                $jsonEnd = $str.LastIndexOf('}') + 1
+                if ($jsonStart -ge 0 -and $jsonEnd -gt $jsonStart) {
+                    $jsonString = $str.Substring($jsonStart, $jsonEnd - $jsonStart)
+                    try {
+                        $jsonData = $jsonString | ConvertFrom-Json
+
+                        if ($jsonData.LicenseStateJson) {
+                            $licenseStateBytes = [System.Convert]::FromBase64String($jsonData.LicenseStateJson)
+                            $licenseStateString = [System.Text.Encoding]::UTF8.GetString($licenseStateBytes)
+
+                            # Находим конец валидного JSON (до символа |)
+                            $jsonEndIndex = $licenseStateString.IndexOf('|')
+                            if ($jsonEndIndex -gt 0) {
+                                $cleanJsonString = $licenseStateString.Substring(0, $jsonEndIndex)
+                            } else {
+                                $cleanJsonString = $licenseStateString
+                            }
+
+                            $licenseStateJson = $cleanJsonString | ConvertFrom-Json
+
+                            if ($licenseStateJson.system_description -and $licenseStateJson.system_description.acs -and $licenseStateJson.system_description.acs.known_devices) {
+                                foreach ($device in $licenseStateJson.system_description.acs.known_devices) {
+                                    $mac = $device.device_identifier
+                                    $accumulatedTimestamp = $device.accumulated_timestamp
+                                    
+                                    # Определяем статус лицензии: если accumulated_timestamp = "00:00:00", то нелицензированная
+                                    if ($accumulatedTimestamp -eq "00:00:00") {
+                                        $licenseStatus = 0
+                                    } else {
+                                        $licenseStatus = 1
+                                    }
+                                    $licenseStatusByMac[$mac] = $licenseStatus
+                                }
+                            }
+                        }
+                    } catch {
+                        # Error parsing LicenseStateJson: $_
+                    }
+                } else {
+                    # Could not extract JSON from line: jsonStart=$jsonStart, jsonEnd=$jsonEnd
+                }
+            }
+        } else {
+            # No license JSON result returned from database
+        }
+
+        # --- CAMERA CREATION DATES ---
+        $cameraCreationQuery = @"
+SELECT c.ID, c.NAME, c.CREATED_TIME 
+FROM CAMERA c 
+ORDER BY c.ID;
+"@
+        $cameraCreationResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $cameraCreationQuery
+
+        $cameraCreationByCamera = @{}
+        if ($cameraCreationResult) {
+            foreach ($line in $cameraCreationResult) {
+                $str = $line.ToString()
+                # Fix: Allow for missing milliseconds in date, and tolerate extra whitespace
+                if ($str -match '^\s*(\d+)\s+(.+?)\s+(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?)?)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
+                    $parts = $str -split '\s+'
+                    $parts = $parts | Where-Object { $_ -ne "" }
+                    if ($parts.Count -ge 3) {
+                        $cid = $parts[0]
+                        $cname = ($parts[1..($parts.Count-2)] -join " ").Trim()
+                        $createdTime = $parts[-1]
+                        $creationDateStr = $null
+                        if ($createdTime -match '(\d{4}-\d{2}-\d{2})') {
+                            $creationDateStr = $matches[1]
+                        } else {
+                            foreach ($part in $parts) {
+                                if ($part -match '^\d{4}-\d{2}-\d{2}$') {
+                                    $creationDateStr = $part
+                                    break
+                                }
+                            }
+                            if (-not $creationDateStr) {
+                                $creationDateStr = "N/A"
+                            }
+                        }
+                        $cameraCreationByCamera[$cid] = @{
+                            CameraName = $cname
+                            CreationDate = $creationDateStr
+                        }
+                    }
+                }
+            }
+        } else {
+            # No camera creation result returned from database
+        }
+
+        # --- CAMERAS WITH MAC ADDRESSES ---
+        $camerasQuery = @"
+SELECT c.ID, c.NAME, d.MAC_ADDRESS 
+FROM CAMERA c 
+JOIN DEVICE d ON c.DEVICE_ID = d.ID 
+ORDER BY c.ID;
+"@
+        $camerasResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $camerasQuery
+
+        # This will be the final $licenseStatusByCamera: keyed by camera ID, value is hashtable with CameraName, MacAddress, LicenseStatus, CreationDate
+        $licenseStatusByCamera = @{}
+        if ($camerasResult) {
+            foreach ($line in $camerasResult) {
+                $str = $line.ToString()
+                # Fix: MAC address may contain colons or dashes, so match more flexibly
+                if ($str -match '^\s*(\d+)\s+(.+?)\s+([A-Fa-f0-9:-]+)\s*$' -and $str -notmatch '^[=\-\s]*$' -and $str -notmatch '^\s*[A-Z_]+\s*$') {
+                    $parts = $str -split '\s+'
+                    $parts = $parts | Where-Object { $_ -ne "" }
+                    if ($parts.Count -ge 3) {
+                        $cid = $parts[0]
+                        $cname = ($parts[1..($parts.Count-2)] -join " ").Trim()
+                        $mac = $parts[-1]
+                        $licenseStatus = 1
+                        if ($licenseStatusByMac.ContainsKey($mac)) {
+                            $licenseStatus = $licenseStatusByMac[$mac]
+                        } else {
+                            # Try to match MAC address without colons/dashes if not found
+                            $macSimple = $mac -replace '[:-]', ''
+                            foreach ($key in $licenseStatusByMac.Keys) {
+                                if (($key -replace '[:-]', '') -eq $macSimple) {
+                                    $licenseStatus = $licenseStatusByMac[$key]
+                                    break
+                                }
+                            }
+                        }
+                        $creationDate = "N/A"
+                        if ($cameraCreationByCamera.ContainsKey($cid)) {
+                            $creationDate = $cameraCreationByCamera[$cid].CreationDate
+                        }
+                        $licenseStatusByCamera[$cid] = @{
+                            CameraName = $cname
+                            MacAddress = $mac
+                            LicenseStatus = $licenseStatus
+                            CreationDate = $creationDate
+                        }
+                    }
+                }
+            }
+        } else {
+            # No cameras result returned from database
+        }
+
+        # --- CONTINUOUS RECORDING STATUS ---
+        $recordingStatusByCamera = @{}
+        $recordingStatusQuery = @"
+SELECT crs.CAMERA_ID,
+       IIF(crs.IS_RECORDING, 1, 0) AS IS_RECORDING
+FROM CAMERA_RECORDING_STATE crs
+JOIN (
+    SELECT CAMERA_ID, MAX(CREATED_TIME) AS MAX_TIME
+    FROM CAMERA_RECORDING_STATE
+    GROUP BY CAMERA_ID
+) mx ON mx.CAMERA_ID = crs.CAMERA_ID AND mx.MAX_TIME = crs.CREATED_TIME;
+"@
+        $recordingStatusResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $recordingStatusQuery
+        if ($recordingStatusResult) {
+            foreach ($line in $recordingStatusResult) {
+                $str = $line.ToString()
+                if ($str -match '^\s*(\d+)\s+(\d+)\s*$') {
+                    $cid = $matches[1]
+                    $status = [int]$matches[2]
+                    $recordingStatusByCamera[$cid] = $status
+                }
+            }
+        }
 
         # 6. Write metrics to export file
-        Write-Log "Writing metrics to export file..."
         $metricsFile = "$ExportDir\axis_camera_station_metrics.prom"
         
         $metrics = @()
@@ -952,8 +739,21 @@ GROUP BY ec.ID, ec.NAME;
         $metrics += "# HELP axis_camera_station_last_recording_start_timestamp_seconds Last recording start time (unix timestamp, seconds) for camera"
         $metrics += "# TYPE axis_camera_station_last_recording_start_timestamp_seconds gauge"
         foreach ($cid in $lastStopTimes.Keys) {
-            $stopUnix = $lastStopTimes[$cid]
-            $startUnix = $lastStartTimes[$cid]
+            $stopTicks = $lastStopTimes[$cid]
+            $startTicks = $lastStartTimes[$cid]
+            # Конвертируем ticks в Unix timestamp (секунды)
+            $stopUnix = [long]($stopTicks / 10000000 - 62135596800)
+            $startUnix = [long]($startTicks / 10000000 - 62135596800)
+            
+            # Проверяем, что timestamp'ы в разумных пределах (не слишком большие)
+            $currentYear = [DateTime]::Now.Year
+            $maxTimestamp = [long]([DateTime]::new($currentYear + 10, 1, 1) - [DateTime]::new(1970, 1, 1)).TotalSeconds
+            
+            if ($stopUnix -gt $maxTimestamp) {
+                # Если STOP_TIME слишком большое, используем START_TIME + 1 час как приближение
+                $stopUnix = $startUnix + 3600
+            }
+            
             $cname = $cameraList[$cid]
             if ($cname) { $cname = $cname -replace '\\', '\\\\' }
             $metrics += "axis_camera_station_last_recording_stop_timestamp_seconds{camera_id=`"$cid`",camera_name=`"$cname`"} $stopUnix"
@@ -1001,42 +801,104 @@ GROUP BY ec.ID, ec.NAME;
             $sname = $sname -replace '\\', '\\\\'
             $metrics += "axis_camera_station_storage_used_bytes_by_storage{storage_id=`"$storageId`",storage_name=`"$sname`"} $size"
         }
-        
+
+        # Метрики по камерам (https_status)
+        $metrics += "# HELP axis_camera_station_device_https_status HTTPS enabled status per camera"
+        $metrics += "# TYPE axis_camera_station_device_https_status gauge"
+        foreach ($cid in $httpsStatusByCamera.Keys) {
+            $httpsData = $httpsStatusByCamera[$cid]
+            $cname = $httpsData.CameraName
+            $httpsValue = $httpsData.HttpsEnabled
+            if ($cname) { $cname = $cname -replace '\\', '\\\\' }
+            $metrics += "axis_camera_station_device_https_status{camera_id=`"$cid`",camera_name=`"$cname`"} $httpsValue"
+        }
+
+        # Метрики по камерам (license_status)
+        $metrics += "# HELP axis_camera_station_device_license_status License status per camera (0=unlicensed, 1=licensed)"
+        $metrics += "# TYPE axis_camera_station_device_license_status gauge"
+        foreach ($cid in $licenseStatusByCamera.Keys) {
+            $licenseData = $licenseStatusByCamera[$cid]
+            if ($licenseData -is [hashtable]) {
+                $cname = $licenseData.CameraName
+                $licenseValue = $licenseData.LicenseStatus
+                if ($cname) { $cname = $cname -replace '\\', '\\\\' }
+                $metrics += "axis_camera_station_device_license_status{camera_id=`"$cid`",camera_name=`"$cname`"} $licenseValue"
+            } else {
+                # License data for camera $cid is not a hashtable: $($licenseData.GetType())
+            }
+        }
+
+        # Метрики по камерам (ntp_dhcp_status)
+        $metrics += "# HELP axis_camera_station_camera_ntp_dhcp_status NTP source DHCP status per camera (1=DHCP, 0=Static)"
+        $metrics += "# TYPE axis_camera_station_camera_ntp_dhcp_status gauge"
+        foreach ($cid in $cameraList.Keys) {
+            $dhcpStatus = 0
+            if ($ntpDhcpStatusByCamera.ContainsKey($cid)) {
+                $dhcpStatus = $ntpDhcpStatusByCamera[$cid]
+            }
+            $cname = $cameraList[$cid]
+            if ($cname) { $cname = $cname -replace '\\', '\\\\' }
+            $metrics += "axis_camera_station_camera_ntp_dhcp_status{camera_id=`"$cid`",camera_name=`"$cname`"} $dhcpStatus"
+        }
+
+        # Метрики по камерам (creation_date)
+        $metrics += "# HELP axis_camera_station_device_creation_date Camera creation date as Unix timestamp (seconds)"
+        $metrics += "# TYPE axis_camera_station_device_creation_date gauge"
+        foreach ($cid in $licenseStatusByCamera.Keys) {
+            $licenseData = $licenseStatusByCamera[$cid]
+            if ($licenseData -is [hashtable]) {
+                $cname = $licenseData.CameraName
+                $creationDate = $licenseData.CreationDate
+                if ($cname) { $cname = $cname -replace '\\', '\\\\' }
+                
+                # Конвертируем дату в Unix timestamp
+                $creationTimestamp = -1  # Значение по умолчанию для отсутствующих данных
+                if ($creationDate -ne "N/A" -and $creationDate -match '^\d{4}-\d{2}-\d{2}$') {
+                    try {
+                        # Добавляем время 00:00:00 к дате и конвертируем в Unix timestamp
+                        $dateTime = [DateTime]::ParseExact("$creationDate 00:00:00", "yyyy-MM-dd HH:mm:ss", $null)
+                        $epoch = [DateTime]::new(1970, 1, 1, 0, 0, 0, 0, [DateTimeKind]::Utc)
+                        $creationTimestamp = [long]($dateTime.ToUniversalTime() - $epoch).TotalSeconds
+                    }
+                    catch {
+                        # В случае ошибки парсинга оставляем -1
+                        $creationTimestamp = -1
+                    }
+                } else {
+                    # Creation date $creationDate is N/A or doesn't match format, using -1
+                }
+                
+                $metrics += "axis_camera_station_device_creation_date{camera_id=`"$cid`",camera_name=`"$cname`"} $creationTimestamp"
+            } else {
+                # License data for camera $cid is not a hashtable: $($licenseData.GetType())
+            }
+        }
+
+        # Метрики по камерам (continuous recording status)
+        $metrics += "# HELP axis_camera_station_camera_continuous_recording_status Continuous recording status per camera (1=Recording, 0=Stopped)"
+        $metrics += "# TYPE axis_camera_station_camera_continuous_recording_status gauge"
+        foreach ($cid in $cameraList.Keys) {
+            $status = 0
+            if ($recordingStatusByCamera.ContainsKey($cid)) {
+                $status = $recordingStatusByCamera[$cid]
+            }
+            $cname = $cameraList[$cid]
+            if ($cname) { $cname = $cname -replace '\\', '\\\\' }
+            $metrics += "axis_camera_station_camera_continuous_recording_status{camera_id=`"$cid`",camera_name=`"$cname`"} $status"
+        }
+
         # Write to file
         $metrics | Out-File -FilePath $metricsFile -Encoding UTF8 -Force
-        
-        Write-Log "Metrics written to file: $metricsFile"
-        
-        # Log summary
-        if ($oldestTimestamp -gt 0) {
-            $oldestDate = [DateTimeOffset]::FromUnixTimeSeconds($oldestTimestamp).DateTime
-            # Get camera name from camera list
-            $oldestCameraName = "Unknown"
-            if ($cameraList -and $cameraList.ContainsKey($oldestCameraId)) {
-                $oldestCameraName = $cameraList[$oldestCameraId]
-            }
-            Write-Log "Oldest recording: $oldestCameraName ($oldestDate)"
-        }
-        Write-Log "Total recordings: $totalRecordings"
-        Write-Log "Total cameras: $uniqueCameras"
-        if ($newestTimestamp -gt 0) {
-            $newestDate = [DateTimeOffset]::FromUnixTimeSeconds($newestTimestamp).DateTime
-            Write-Log "Newest recording: $newestDate"
-        }
-        
-        Write-Log "Monitoring completed successfully!"
     }
     catch {
-        Write-Log "ERROR: $($_.Exception.Message)"
-        Write-DebugLog "Exception details: $($_.Exception.ToString())"
+        # Exception details: $($_.Exception.ToString())
         throw
     }
     finally {
         # Cleanup temp files
-        Cleanup-TempFiles
-        Write-Log "=== MONITORING SESSION END ==="
+        Remove-TempFiles
     }
 }
 
 # Start monitoring
-Start-AxisMonitoring 
+Start-AxisMonitoring

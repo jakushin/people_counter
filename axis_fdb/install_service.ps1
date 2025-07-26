@@ -394,7 +394,7 @@ try {
     Write-Host " [OK]" -ForegroundColor Green
     
     Write-Host "Creating settings..." -NoNewline
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RunOnlyIfNetworkAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
     Write-Host " [OK]" -ForegroundColor Green
     
     Write-Host "Creating principal..." -NoNewline

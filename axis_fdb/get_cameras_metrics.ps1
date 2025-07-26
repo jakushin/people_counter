@@ -13,6 +13,9 @@ param(
     [int]$ApiTimeoutSeconds = 30
 )
 
+# --- Время выполнения скрипта ---
+$script:scriptStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
 # Early check for credential file
 if (!(Test-Path $CredentialFile)) {
     Write-Host "ERROR: Credential file not found: $CredentialFile" -ForegroundColor Red
@@ -156,6 +159,9 @@ function Get-AvailableCameras {
         [int]$TimeoutSeconds = 5
     )
     
+    # Старт таймера для измерения производительности
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    
     # Шаг 1: Удаляем дублирующиеся hostname
     $groups = $Cameras | Group-Object { $_.Hostname }
     
@@ -163,62 +169,42 @@ function Get-AvailableCameras {
     foreach ($group in $groups) {
         $firstCamera = $group.Group[0]
         $newCamera = @{
-            CameraID = $firstCamera.CameraID
+            CameraID   = $firstCamera.CameraID
             CameraName = $firstCamera.CameraName
-            Hostname = $firstCamera.Hostname
+            Hostname   = $firstCamera.Hostname
         }
         $uniqueCameras += $newCamera
     }
     
-    # Шаг 2: Параллельная проверка доступности
-    
+    # Шаг 2: Используем .NET Ping.SendPingAsync для параллельной ICMP-проверки
     $availableCameras = @()
-    $jobs = @()
-    $jobResults = @{}
-    
-    # Создаем jobs для параллельного ping
+
     for ($i = 0; $i -lt $uniqueCameras.Count; $i += $MaxConcurrent) {
         $batch = $uniqueCameras[$i..([math]::Min($i + $MaxConcurrent - 1, $uniqueCameras.Count - 1))]
         
-        foreach ($camera in $batch) {
-            if (-not $camera.Hostname -or $camera.Hostname -eq "") {
-                continue
-            }
-            
-            $job = Start-Job -ScriptBlock {
-                param($Hostname, $PingCount)
-                try {
-                    $result = Test-Connection -ComputerName $Hostname -Count $PingCount -Quiet
-                    return @{ Hostname = $Hostname; Available = $result }
-                }
-                catch {
-                    return @{ Hostname = $Hostname; Available = $false; Error = $_.Exception.Message }
-                }
-            } -ArgumentList $camera.Hostname, $PingCount
-            
-            $jobs += $job
-            $jobResults[$camera.Hostname] = $camera
+        # Формируем задачи Ping
+        $tasks = @()
+        foreach ($cam in $batch) {
+            if (-not $cam.Hostname -or $cam.Hostname -eq "") { continue }
+            $pingObj = New-Object System.Net.NetworkInformation.Ping
+            $tasks   += $pingObj.SendPingAsync($cam.Hostname, $TimeoutSeconds * 1000)
         }
         
-        # Ждем завершения текущего batch
-        $jobs | Wait-Job | Out-Null
-        
-        # Собираем результаты
-        foreach ($job in $jobs) {
-            $result = Receive-Job -Job $job
-            Remove-Job -Job $job
-            
-            if ($result.Available) {
-                $camera = $jobResults[$result.Hostname]
-                $availableCameras += $camera
+        # Ожидание завершения всей пачки и обработка результатов
+        if ($tasks.Count -gt 0) {
+            [void][System.Threading.Tasks.Task]::WhenAll($tasks)
+            for ($j = 0; $j -lt $tasks.Count; $j++) {
+                $reply = $tasks[$j].Result
+                if ($reply.Status -eq [System.Net.NetworkInformation.IPStatus]::Success) {
+                    $availableCameras += $batch[$j]
+                }
             }
         }
-        
-        $jobs = @()
-        $jobResults = @{}
     }
     
-
+    # Останавливаем таймер и выводим время
+    $sw.Stop()
+    Write-Host ("Get-AvailableCameras executed in {0} ms" -f $sw.ElapsedMilliseconds) -ForegroundColor Cyan
     
     return $availableCameras
 }
@@ -234,9 +220,81 @@ function Generate-PrometheusMetrics {
 # Generated: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 # Total cameras: $($Metrics.Count)
 
+# HELP axis_camera_station_vapix_camera_availability_status Camera reachability via ping (1=OK, 0=Not accessible)
+# TYPE axis_camera_station_vapix_camera_availability_status gauge
+
+# HELP axis_camera_station_vapix_api_auth_status Camera API authentication status (1=OK, 0=Auth failed)
+# TYPE axis_camera_station_vapix_api_auth_status gauge
+
+# HELP axis_camera_station_vapix_snmp_enabled SNMP enabled status (1=enabled, 0=disabled)
+# TYPE axis_camera_station_vapix_snmp_enabled gauge
+
+# HELP axis_camera_station_vapix_encryption_enabled SD card encryption feature enabled (1=enabled, 0=disabled)
+# TYPE axis_camera_station_vapix_encryption_enabled gauge
+
+# HELP axis_camera_station_vapix_disk_encrypted SD card currently encrypted (1=encrypted, 0=not encrypted)
+# TYPE axis_camera_station_vapix_disk_encrypted gauge
+
+# HELP axis_camera_station_vapix_sd_total_size_bytes SD card total size in bytes
+# TYPE axis_camera_station_vapix_sd_total_size_bytes gauge
+
+# HELP axis_camera_station_vapix_sd_free_size_bytes SD card free size in bytes
+# TYPE axis_camera_station_vapix_sd_free_size_bytes gauge
+
+# HELP axis_camera_station_vapix_sd_cleanup_level SD card cleanup level percentage
+# TYPE axis_camera_station_vapix_sd_cleanup_level gauge
+
+# HELP axis_camera_station_vapix_sd_max_age_hours SD card recordings maximum age in hours
+# TYPE axis_camera_station_vapix_sd_max_age_hours gauge
+
+# HELP axis_camera_station_vapix_sd_status_ok SD card status (1=OK, 0=Error)
+# TYPE axis_camera_station_vapix_sd_status_ok gauge
+
+# HELP axis_camera_station_vapix_sd_usage_percent SD card usage percentage
+# TYPE axis_camera_station_vapix_sd_usage_percent gauge
+
+# HELP axis_camera_station_vapix_sd_recordings_total Total recordings found on SD card
+# TYPE axis_camera_station_vapix_sd_recordings_total gauge
+
+# HELP axis_camera_station_vapix_request_success API request success flag (1=success, 0=failed)
+# TYPE axis_camera_station_vapix_request_success gauge
+
+# HELP axis_camera_station_vapix_ssh_status SSH service enabled status (1=enabled, 0=disabled)
+# TYPE axis_camera_station_vapix_ssh_status gauge
+
+# HELP axis_camera_station_vapix_VMD_status VMD (motion detection) running status (1=running, 0=stopped)
+# TYPE axis_camera_station_vapix_VMD_status gauge
+
+# HELP axis_camera_station_vapix_event_rules_count Number of event rules configured on camera
+# TYPE axis_camera_station_vapix_event_rules_count gauge
+
+# HELP axis_camera_station_vapix_syslog_enabled Remote syslog enabled status (1=enabled, 0=disabled)
+# TYPE axis_camera_station_vapix_syslog_enabled gauge
+
+# HELP axis_camera_station_vapix_firmware_version Firmware version label (value always 1)
+# TYPE axis_camera_station_vapix_firmware_version gauge
+
+# HELP axis_camera_station_vapix_camera_model Camera model label (value always 1)
+# TYPE axis_camera_station_vapix_camera_model gauge
+
+# HELP axis_camera_station_vapix_power_line_frequency_hz Power-line frequency setting in Hz
+# TYPE axis_camera_station_vapix_power_line_frequency_hz gauge
+
 "@
     
     foreach ($metric in $Metrics) {
+        # Метрика доступности камеры (результат пинга)
+        $availability = if ($metric.PingAvailable -eq 1) { 1 } else { 0 }
+        $promContent += "axis_camera_station_vapix_camera_availability_status{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $availability`n"
+
+        # API authentication metric
+        $apiAuthVal = if ($metric.ApiAuthOK -eq 1) { 1 } else { 0 }
+        $promContent += "axis_camera_station_vapix_api_auth_status{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $apiAuthVal`n"
+
+        # SNMP enabled metric
+        $snmpVal = if ($metric.SnmpEnabled -eq 1) { 1 } else { 0 }
+        $promContent += "axis_camera_station_vapix_snmp_enabled{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $snmpVal`n"
+
         if ($metric.Success) {
             # Основные метрики шифрования
             $promContent += "axis_camera_station_vapix_encryption_enabled{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.EncryptionEnabled)`n"
@@ -290,6 +348,26 @@ function Generate-PrometheusMetrics {
             if ($metric.EventRulesCount -ne $null) {
                 $promContent += "axis_camera_station_vapix_event_rules_count{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.EventRulesCount)`n"
             }
+
+            # Syslog Enabled metric (always present)
+            if ($metric.SyslogEnabled -ne $null) {
+                $promContent += "axis_camera_station_vapix_syslog_enabled{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.SyslogEnabled)`n"
+            }
+
+            # Firmware Version metric (always present)
+            if ($metric.FirmwareVersion -ne $null) {
+                $promContent += "axis_camera_station_vapix_firmware_version{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`",firmware=`"$($metric.FirmwareVersion)`"} 1`n"
+            }
+
+            # Camera Model metric (always present)
+            if ($metric.CameraModel -ne $null) {
+                $promContent += "axis_camera_station_vapix_camera_model{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`",model=`"$($metric.CameraModel)`"} 1`n"
+            }
+
+            # Power Line Frequency metric (always present)
+            if ($metric.PowerLineFrequency -ne $null) {
+                $promContent += "axis_camera_station_vapix_power_line_frequency_hz{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.PowerLineFrequency)`n"
+            }
         } else {
             # Метрика неуспешного запроса
             $promContent += "axis_camera_station_vapix_request_success{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} 0`n"
@@ -310,6 +388,26 @@ function Generate-PrometheusMetrics {
             # Event Rules Count metric (always present, even for failed cameras)
             if ($metric.EventRulesCount -ne $null) {
                 $promContent += "axis_camera_station_vapix_event_rules_count{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.EventRulesCount)`n"
+            }
+
+            # Syslog Enabled metric (always present, even for failed cameras)
+            if ($metric.SyslogEnabled -ne $null) {
+                $promContent += "axis_camera_station_vapix_syslog_enabled{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.SyslogEnabled)`n"
+            }
+
+            # Firmware Version metric (always present, even for failed cameras)
+            if ($metric.FirmwareVersion -ne $null) {
+                $promContent += "axis_camera_station_vapix_firmware_version{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`",firmware=`"$($metric.FirmwareVersion)`"} 1`n"
+            }
+
+            # Camera Model metric (always present, even for failed cameras)
+            if ($metric.CameraModel -ne $null) {
+                $promContent += "axis_camera_station_vapix_camera_model{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`",model=`"$($metric.CameraModel)`"} 1`n"
+            }
+
+            # Power Line Frequency metric (always present, even for failed cameras)
+            if ($metric.PowerLineFrequency -ne $null) {
+                $promContent += "axis_camera_station_vapix_power_line_frequency_hz{camera_id=`"$($metric.CameraID)`",camera_name=`"$($metric.CameraName)`",hostname=`"$($metric.Hostname)`"} $($metric.PowerLineFrequency)`n"
             }
         }
     }
@@ -508,6 +606,116 @@ for ($i = 0; $i -lt $availableCameras.Count; $i += $MaxConcurrentMetrics) {
                         return $matches.Count
                     }
                 }
+                
+                # Метрика Syslog статус
+                function Get-SyslogStatus {
+                    param($Hostname, $TimeoutSeconds, $credentials)
+                    try {
+                        # Правильный VAPIX API для Remote Syslog
+                        $uri = ("https://{0}:443/axis-cgi/remotesyslog.cgi" -f $Hostname)
+                        $jsonBody = '{"apiVersion":"1.0","method":"status"}'
+                        $headers = @{ "Content-Type" = "application/json" }
+                        
+                        $resp = Invoke-WebRequestSafe -uri $uri -method "POST" -body $jsonBody -headers $headers -credentials $credentials -timeout ($TimeoutSeconds*1000)
+                        
+                        if ($resp) {
+                            $json = Parse-JsonSafe $resp
+                            if ($json -and $json.data -and $json.data.PSObject.Properties["enabled"]) {
+                                return [int]($json.data.enabled)
+                            }
+                        }
+                    }
+                    catch {
+                        # Игнорируем ошибки API
+                    }
+                    
+                    return 0
+                }
+
+                # Новая метрика: Camera Info (Firmware и Model)
+                function Get-CameraInfo {
+                    param($Hostname, $TimeoutSeconds, $credentials)
+                    
+                    $firmwareVersion = "unknown"
+                    $cameraModel = "unknown"
+                    
+                    try {
+                        # Получаем Properties
+                        $uri = ("https://{0}:443/axis-cgi/param.cgi?action=list&group=Properties" -f $Hostname)
+                        $resp = Invoke-WebRequestSafe -uri $uri -credentials $credentials -timeout ($TimeoutSeconds*1000)
+                        
+                        if ($resp) {
+                            # Извлекаем firmware
+                            if ($resp -match "root\.Properties\.Firmware\.Version=([^\r\n]+)") {
+                                $firmwareVersion = $Matches[1]
+                            }
+                            
+                            # Извлекаем модель
+                            if ($resp -match "root\.Properties\.System\.ProductNumber=([^\r\n]+)") {
+                                $cameraModel = $Matches[1]
+                            }
+                        }
+                        
+                        # Fallback - получаем Brand информацию
+                        $uri = ("https://{0}:443/axis-cgi/param.cgi?action=list&group=Brand" -f $Hostname)
+                        $resp = Invoke-WebRequestSafe -uri $uri -credentials $credentials -timeout ($TimeoutSeconds*1000)
+                        
+                        if ($resp) {
+                            # Если модель не найдена в Properties, пробуем Brand
+                            if ($cameraModel -eq "unknown" -and $resp -match "root\.Brand\.ProdNbr=([^\r\n]+)") {
+                                $cameraModel = $Matches[1]
+                            }
+                        }
+                    }
+                    catch {
+                        # Игнорируем ошибки
+                    }
+                    
+                    return @{
+                        FirmwareVersion = $firmwareVersion
+                        CameraModel = $cameraModel
+                    }
+                }
+
+                # Новая метрика: Power Line Frequency
+                function Get-PowerLineFrequency {
+                    param($Hostname, $TimeoutSeconds, $credentials)
+                    
+                    $powerLineFreq = 0
+                    
+                    try {
+                        # Получаем ImageSource параметры
+                        $uri = ("https://{0}:443/axis-cgi/param.cgi?action=list&group=ImageSource" -f $Hostname)
+                        $resp = Invoke-WebRequestSafe -uri $uri -credentials $credentials -timeout ($TimeoutSeconds*1000)
+                        
+                        if ($resp) {
+                            # Ищем CaptureFrequency в I0 (первое изображение)
+                            if ($resp -match "root\.ImageSource\.I0\.CaptureFrequency=([^\r\n]+)") {
+                                $fullValue = $Matches[1]
+                                # Извлекаем только цифры (50 или 60)
+                                if ($fullValue -match "(\d+)Hz") {
+                                    $powerLineFreq = [int]$Matches[1]
+                                }
+                            }
+                        }
+                    }
+                    catch {
+                        # Игнорируем ошибки
+                    }
+                    
+                    return $powerLineFreq
+                }
+
+                # Новая метрика: SNMP enabled
+                function Get-SnmpEnabled {
+                    param($Hostname, $TimeoutSeconds, $credentials)
+                    $uri = ("https://{0}:443/axis-cgi/param.cgi?action=list&group=SNMP" -f $Hostname)
+                    $resp = Invoke-WebRequestSafe -uri $uri -credentials $credentials -timeout ($TimeoutSeconds*1000)
+                    if ($resp -and ($resp -match "root\.SNMP\.Enabled=(yes|no)")) {
+                        return [int]($Matches[1] -eq "yes")
+                    }
+                    return 0
+                }
                 # Метрики SD-карты
                 function GetSdMetrics {
                     param($Hostname, $TimeoutSeconds, $credentials)
@@ -555,7 +763,16 @@ for ($i = 0; $i -lt $availableCameras.Count; $i += $MaxConcurrentMetrics) {
                 $sshStatus = Get-SshStatus -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
                 $vmdStatus = Get-VmdStatus -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
                 $eventRulesCount = GetEventRulesCount -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
+                $syslogStatus = Get-SyslogStatus -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
+                $cameraInfo = Get-CameraInfo -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
+                $powerLineFreq = Get-PowerLineFrequency -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
+                $snmpEnabled = Get-SnmpEnabled -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
                 $sdMetrics = GetSdMetrics -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
+                # Определяем успешность API аутентификации: если хотя бы ответ от param.cgi распарсился
+                $apiAuthOK = 1
+                if (-not $cameraInfo -or ($cameraInfo.FirmwareVersion -eq "unknown" -and $cameraInfo.CameraModel -eq "unknown")) {
+                    $apiAuthOK = 0
+                }
                 $totalRecordingsValue = GetSdRecordingsCount -Hostname $Hostname -TimeoutSeconds $TimeoutSeconds -credentials $creds
                 if ($sdMetrics) {
                     $metricsObject = @{
@@ -572,7 +789,14 @@ for ($i = 0; $i -lt $availableCameras.Count; $i += $MaxConcurrentMetrics) {
                         Filesystem = $sdMetrics.Filesystem
                         TotalRecordings = $totalRecordingsValue
                         EventRulesCount = $eventRulesCount
+                        SyslogEnabled = $syslogStatus
+                        FirmwareVersion = $cameraInfo.FirmwareVersion
+                        CameraModel = $cameraInfo.CameraModel
+                        PowerLineFrequency = $powerLineFreq
+                        SnmpEnabled = $snmpEnabled
                         Success = $true
+                        PingAvailable = 1
+                        ApiAuthOK = $apiAuthOK
                     }
                     if ($sshStatus -ne $null) { $metricsObject.SshEnabled = $sshStatus }
                     $metricsObject.VmdStatus = $vmdStatus
@@ -584,8 +808,15 @@ for ($i = 0; $i -lt $availableCameras.Count; $i += $MaxConcurrentMetrics) {
                         Hostname = $Hostname
                         TotalRecordings = 0
                         EventRulesCount = $eventRulesCount
+                        SyslogEnabled = $syslogStatus
+                        FirmwareVersion = $cameraInfo.FirmwareVersion
+                        CameraModel = $cameraInfo.CameraModel
+                        PowerLineFrequency = $powerLineFreq
+                        SnmpEnabled = $snmpEnabled
                         Success = $false
                         Error = "No SD card attributes found"
+                        PingAvailable = 1
+                        ApiAuthOK = $apiAuthOK
                     }
                     if ($sshStatus -ne $null) { $metricsObject.SshEnabled = $sshStatus }
                     $metricsObject.VmdStatus = $vmdStatus
@@ -611,13 +842,29 @@ for ($i = 0; $i -lt $availableCameras.Count; $i += $MaxConcurrentMetrics) {
             $debugLogs, $result = $jobResult
             $allMetrics += $result
         } else {
-            Write-Host "WARNING: Job did not return expected array of [debugLogs, result]!" -ForegroundColor Red
+            # Write-Host "WARNING: Job did not return expected array of [debugLogs, result]!" -ForegroundColor Red
             $allMetrics += $jobResult
         }
     }
 }
 
-# Генерируем Prometheus файл
+# Добавляем записи для камер, которые не ответили на ping
+$allCameraIds = $cameras | ForEach-Object { $_.CameraID }
+foreach ($cam in $cameras) {
+    if (-not ($allMetrics | Where-Object { $_.CameraID -eq $cam.CameraID })) {
+        $allMetrics += @{ 
+            CameraID = $cam.CameraID;
+            CameraName = $cam.CameraName;
+            Hostname = $cam.Hostname;
+            PingAvailable = 0;
+            Success = $false 
+            ApiAuthOK = 0
+            SnmpEnabled = 0
+        }
+    }
+}
+
+# Генерируем Prometheus файл после того, как список $allMetrics полностью сформирован
 $promContent = Generate-PrometheusMetrics -Metrics $allMetrics
 
 # Сохраняем файл в C:\windows_exporter
@@ -628,13 +875,16 @@ Set-Content -Path $outputPath -Value $promContent -Encoding UTF8
 $successCount = ($allMetrics | Where-Object { $_.Success }).Count
 $errorCount = ($allMetrics | Where-Object { -not $_.Success }).Count
 
-
-
-if ($errorCount -gt 0) {
-    Write-Host "WARNING: $errorCount camera(s) failed to respond" -ForegroundColor Yellow
-}
+## Suppress runtime warning output
+# if ($errorCount -gt 0) {
+#     Write-Host "WARNING: $errorCount camera(s) failed to respond" -ForegroundColor Yellow
+# }
 
 # Очистка временных файлов
 if (Test-Path $TempDatabase) {
     Remove-Item $TempDatabase -Force
 } 
+
+# --- Вывод общего времени выполнения ---
+$script:scriptStopwatch.Stop()
+Write-Host ("Script completed in {0} seconds" -f ([math]::Round($script:scriptStopwatch.Elapsed.TotalSeconds,2))) -ForegroundColor Green 
