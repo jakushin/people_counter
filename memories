@@ -9,9 +9,26 @@ git fetch origin
 git reset --hard origin/$(git rev-parse --abbrev-ref HEAD)
 
 
+как внести бранч в мастер одним коммитом
+# перейти на основную ветку
+git checkout main
+
+# собрать все изменения из axis-fb_ver2 в индекс одним «squash»
+git merge --squash axis-fb_ver2
+
+# зафиксировать их одним коммитом
+git commit -m "Squash-merge: optimizations from axis-fb_ver2 (get_cameras_metrics.ps1 improvements)"
+
+# при необходимости отправить на сервер
+git push origin main
 
 
 
+
+
+
+
+-------
 используем проект uxplay и собираем его из исходного кода
 делаем всё в одном docker контейнере, чтобы не было X11 проблем с доступом
 для отобраржения видео используем webtrc + нужно реализовать сигналы: что пользователь нажал, подключился или отключился от uxplay
