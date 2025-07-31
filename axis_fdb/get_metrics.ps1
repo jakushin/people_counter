@@ -230,6 +230,10 @@ function Start-AxisMonitoring {
         $storageQuery = "SELECT STORAGE_ID, ROOT_PATH, RECORDING_DIRECTORY FROM STORAGE_LOCAL_DISK;"
         $storageResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $storageQuery
         $storageList = @{}
+        # Hashtable to keep total disk capacity per storage in bytes
+        $storageCapacityByStorage = @{}
+        # Hashtable to keep free space per storage (bytes)
+        $storageFreeByStorage = @{}
         if ($storageResult) {
             foreach ($line in $storageResult) {
                 $str = $line.ToString()
@@ -240,6 +244,24 @@ function Start-AxisMonitoring {
                     $recordingDir = $matches[3].Trim()
                     $storageName = "$rootPath$recordingDir"
                     $storageList[$sid] = $storageName
+
+                    # Determine total capacity of the drive where storage resides (bytes)
+                    try {
+                        # Extract drive letter like "E:" from ROOT_PATH
+                        $driveId = ($rootPath -replace "\\", "").Substring(0,2)
+                        $driveInfo = Get-CimInstance -ClassName Win32_LogicalDisk -Filter "DeviceID='$driveId'"
+                        if ($driveInfo) {
+                            $capacity = [long]$driveInfo.Size
+                            $freeSpace = [long]$driveInfo.FreeSpace
+                        } else {
+                            $capacity = -1
+                            $freeSpace = -1
+                        }
+                    } catch {
+                        $capacity = -1
+                    }
+                    $storageCapacityByStorage[$sid] = $capacity
+                    $storageFreeByStorage[$sid] = $freeSpace
                 }
             }
         }
@@ -710,10 +732,6 @@ JOIN (
         # Last update timestamp
         $metrics += "axis_camera_station_monitoring_last_update $currentTimestamp"
         
-        # Все новые метрики
-        $metrics += "# HELP axis_camera_station_storage_used_bytes Total storage used by all recordings"
-        $metrics += "# TYPE axis_camera_station_storage_used_bytes gauge"
-        $metrics += "axis_camera_station_storage_used_bytes $totalStorage"
 
         $metrics += "# HELP axis_camera_station_enabled_total Number of enabled cameras"
         $metrics += "# TYPE axis_camera_station_enabled_total gauge"
@@ -791,15 +809,37 @@ JOIN (
             $metrics += "axis_camera_station_recordings_total_by_storage{storage_id=`"$storageId`",storage_name=`"$sname`"} $count"
         }
 
-        # Метрики по хранилищам (storage_used_bytes_by_storage)
-        $metrics += "# HELP axis_camera_station_storage_used_bytes_by_storage Storage used by storage in bytes"
-        $metrics += "# TYPE axis_camera_station_storage_used_bytes_by_storage gauge"
+        # Storage used bytes per storage
+        $metrics += "# HELP axis_camera_station_storage_used_bytes Storage used by storage in bytes"
+        $metrics += "# TYPE axis_camera_station_storage_used_bytes gauge"
         foreach ($storageId in $storageByStorage.Keys) {
             $size = $storageByStorage[$storageId]
             $sname = $storageList[$storageId]
             if (-not $sname) { $sname = "Unknown" }
             $sname = $sname -replace '\\', '\\\\'
-            $metrics += "axis_camera_station_storage_used_bytes_by_storage{storage_id=`"$storageId`",storage_name=`"$sname`"} $size"
+            $metrics += "axis_camera_station_storage_used_bytes{storage_id=`"$storageId`",storage_name=`"$sname`"} $size"
+        }
+
+        # Storage capacity metrics (total bytes per storage)
+        $metrics += "# HELP axis_camera_station_storage_size_bytes Total capacity of storage in bytes"
+        $metrics += "# TYPE axis_camera_station_storage_size_bytes gauge"
+        foreach ($storageId in $storageCapacityByStorage.Keys) {
+            $sizeCap = $storageCapacityByStorage[$storageId]
+            $sname = $storageList[$storageId]
+            if (-not $sname) { $sname = "Unknown" }
+            $sname = $sname -replace '\\', '\\\\'
+            $metrics += "axis_camera_station_storage_size_bytes{storage_id=`"$storageId`",storage_name=`"$sname`"} $sizeCap"
+        }
+
+        # Storage free bytes per storage
+        $metrics += "# HELP axis_camera_station_storage_free_bytes Free space of storage in bytes"
+        $metrics += "# TYPE axis_camera_station_storage_free_bytes gauge"
+        foreach ($storageId in $storageFreeByStorage.Keys) {
+            $free = $storageFreeByStorage[$storageId]
+            $sname = $storageList[$storageId]
+            if (-not $sname) { $sname = "Unknown" }
+            $sname = $sname -replace '\\', '\\\\'
+            $metrics += "axis_camera_station_storage_free_bytes{storage_id=`"$storageId`",storage_name=`"$sname`"} $free"
         }
 
         # Метрики по камерам (https_status)

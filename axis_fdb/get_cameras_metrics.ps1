@@ -483,7 +483,15 @@ foreach ($line in $cameraData) {
     }
 }
 
-
+# --- Фильтрация дубликатов по Hostname (оставляем первую камеру для каждого hostname) ---
+$uniq = @{}
+foreach ($cam in $cameras) {
+    if (-not $uniq.ContainsKey($cam.Hostname)) {
+        $uniq[$cam.Hostname] = $cam
+    }
+}
+$cameras = $uniq.Values
+# ---------------------------------------------------------------------------
 
 # Получаем доступные камеры с параллельным ping
     $availableCameras = Get-AvailableCameras -Cameras $cameras -MaxConcurrent $MaxConcurrentPing -PingCount 1 -TimeoutSeconds $PingTimeoutSeconds

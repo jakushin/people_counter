@@ -23,6 +23,10 @@ git commit -m "Squash-merge: optimizations from axis-fb_ver2 (get_cameras_metric
 git push origin main
 
 
+FireBird
+.\isql.exe -u SYSDBA -p masterkey C:\temp\ACS.FDB
+
+
 
 
 
