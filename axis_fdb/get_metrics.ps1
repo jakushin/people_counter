@@ -15,6 +15,7 @@ if (!(Test-Path $TempDir)) {
 }
 
 # Create export directory if not exists
+
 if (!(Test-Path $ExportDir)) {
     New-Item -ItemType Directory -Path $ExportDir -Force | Out-Null
 }
@@ -516,9 +517,17 @@ SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
 "@
         $licenseJsonResult = Invoke-FirebirdQuery -Database "$TempDir\ACS.FDB" -Query $licenseJsonQuery
 
+        
+
+        # Initialize license counters
+        $totalCoreLicenses = 0
+        $usedCoreLicenses  = 0
+        $freeCoreLicenses  = 0
+
         $licenseStatusByMac = @{}
         if ($licenseJsonResult) {
             foreach ($line in $licenseJsonResult) {
+                
                 $str = $line.ToString()
                 # Try to extract JSON from the line
                 $jsonStart = $str.IndexOf('{')
@@ -529,7 +538,9 @@ SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
                         $jsonData = $jsonString | ConvertFrom-Json
 
                         if ($jsonData.LicenseStateJson) {
-                            $licenseStateBytes = [System.Convert]::FromBase64String($jsonData.LicenseStateJson)
+                            # Clean base64 (remove anything except base64 chars)
+                                $cleanB64 = ([regex]::Match($jsonData.LicenseStateJson, '[A-Za-z0-9+/=]+')).Value
+                                $licenseStateBytes = [System.Convert]::FromBase64String($cleanB64)
                             $licenseStateString = [System.Text.Encoding]::UTF8.GetString($licenseStateBytes)
 
                             # Находим конец валидного JSON (до символа |)
@@ -541,6 +552,16 @@ SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
                             }
 
                             $licenseStateJson = $cleanJsonString | ConvertFrom-Json
+                                
+                                # Calculate license counters
+                                try {
+                                    $totalCoreLicenses = [int]$licenseStateJson.core_licenses
+                                    $usedCoreLicenses  = [int]$licenseStateJson.system_description.acs.license_info.core_used
+                                    $freeCoreLicenses  = $totalCoreLicenses - $usedCoreLicenses
+                                    
+                                } catch {
+                                    # Ignore errors
+                                }
 
                             if ($licenseStateJson.system_description -and $licenseStateJson.system_description.acs -and $licenseStateJson.system_description.acs.known_devices) {
                                 foreach ($device in $licenseStateJson.system_description.acs.known_devices) {
@@ -558,7 +579,7 @@ SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
                             }
                         }
                     } catch {
-                        # Error parsing LicenseStateJson: $_
+                        
                     }
                 } else {
                     # Could not extract JSON from line: jsonStart=$jsonStart, jsonEnd=$jsonEnd
@@ -567,6 +588,8 @@ SELECT "VALUE" FROM KEY_VALUE WHERE KEY = 'LicenseState';
         } else {
             # No license JSON result returned from database
         }
+
+        
 
         # --- CAMERA CREATION DATES ---
         $cameraCreationQuery = @"
@@ -731,6 +754,14 @@ JOIN (
         
         # Last update timestamp
         $metrics += "axis_camera_station_monitoring_last_update $currentTimestamp"
+
+        # License metrics
+        $metrics += "# HELP axis_camera_station_licenses_total Total number of core licences"
+        $metrics += "# TYPE axis_camera_station_licenses_total gauge"
+        $metrics += "axis_camera_station_licenses_total $totalCoreLicenses"
+        $metrics += "# HELP axis_camera_station_licenses_free Number of unused (free) core licences"
+        $metrics += "# TYPE axis_camera_station_licenses_free gauge"
+        $metrics += "axis_camera_station_licenses_free $freeCoreLicenses"
         
 
         $metrics += "# HELP axis_camera_station_enabled_total Number of enabled cameras"
@@ -929,6 +960,7 @@ JOIN (
 
         # Write to file
         $metrics | Out-File -FilePath $metricsFile -Encoding UTF8 -Force
+        
     }
     catch {
         # Exception details: $($_.Exception.ToString())
